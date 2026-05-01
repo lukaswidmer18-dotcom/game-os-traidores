@@ -5,17 +5,17 @@ import { SIZES } from '../design/constants';
 const INTERACT_RADIUS = 40;
 
 export class NPC {
-  readonly sprite: Phaser.GameObjects.Arc;
+  readonly sprite: Phaser.GameObjects.Sprite;
   readonly label: Phaser.GameObjects.Text;
   readonly data: NPCData;
 
   private glow: Phaser.GameObjects.Arc;
-  private initial: Phaser.GameObjects.Text;
   private proximityRing: Phaser.GameObjects.Arc;
   private ringActive = false;
   private scene: Phaser.Scene;
   private baseX: number;
   private baseY: number;
+  private idleEvent: Phaser.Time.TimerEvent;
 
   constructor(scene: Phaser.Scene, x: number, y: number, data: NPCData) {
     this.data = data;
@@ -40,29 +40,17 @@ export class NPC {
 
     // Main body — colored circle
     this.sprite = scene.add
-      .circle(x, y, SIZES.npc, data.color, 1)
-      .setDepth(4);
-    scene.physics.add.existing(this.sprite, true);
-
-    // Initial letter for identity
-    this.initial = scene.add
-      .text(x, y, data.name[0].toUpperCase(), {
-        fontSize: '13px',
-        fontStyle: 'bold',
-        color: '#000000',
-      })
-      .setOrigin(0.5)
+      .sprite(x, y, `npc-${data.id}-0`)
+      .setScale(1.35)
       .setDepth(5);
 
-    // Idle bob animation
-    scene.tweens.add({
-      targets: [this.sprite, this.initial, this.glow],
-      y: { from: y - 2, to: y + 2 },
-      duration: SIZES.npc * 90 + Math.random() * 500,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-      delay: Math.random() * 800,
+    this.idleEvent = scene.time.addEvent({
+      delay: 420 + Math.random() * 260,
+      loop: true,
+      callback: () => {
+        const nextFrame = this.sprite.texture.key.endsWith('-0') ? 1 : 0;
+        this.sprite.setTexture(`npc-${this.data.id}-${nextFrame}`);
+      },
     });
 
     // Name label above
@@ -75,6 +63,16 @@ export class NPC {
       })
       .setOrigin(0.5, 1)
       .setDepth(5);
+
+    scene.tweens.add({
+      targets: [this.sprite, this.glow, this.label],
+      y: { from: y - 2, to: y + 2 },
+      duration: SIZES.npc * 90 + Math.random() * 500,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+      delay: Math.random() * 800,
+    });
 
     // Proximity indicator ring — stays at base position
     this.proximityRing = scene.add
@@ -116,19 +114,18 @@ export class NPC {
   setVisible(visible: boolean): void {
     this.sprite.setVisible(visible);
     this.glow.setVisible(visible);
-    this.initial.setVisible(visible);
     this.label.setVisible(visible);
     this.proximityRing.setVisible(visible);
   }
 
   destroy(): void {
+    this.idleEvent.destroy();
     this.scene.tweens.killTweensOf(this.proximityRing);
     this.scene.tweens.killTweensOf(this.sprite);
     this.scene.tweens.killTweensOf(this.glow);
-    this.scene.tweens.killTweensOf(this.initial);
+    this.scene.tweens.killTweensOf(this.label);
     this.sprite.destroy();
     this.glow.destroy();
-    this.initial.destroy();
     this.label.destroy();
     this.proximityRing.destroy();
   }

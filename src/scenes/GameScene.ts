@@ -1,4 +1,6 @@
 import Phaser from 'phaser';
+import { ensureRuntimeTextures, TEXTURE_KEYS } from '../assets/runtimeTextures';
+import { CLUE_POSITIONS, ROOMS, WALL_THICKNESS, WORLD_HEIGHT, WORLD_WIDTH, getNPCSpawnPosition } from '../data/world';
 import { Player } from '../entities/Player';
 import { NPC } from '../entities/NPC';
 import { NPC_DATA, NPCData } from '../data/npcs';
@@ -12,20 +14,9 @@ import { CluePanel } from '../ui/CluePanel';
 import { PALETTE, SIZES, SPECTACLE } from '../design/constants';
 import { fadeIn, fadeOutTo, burst, spawnDust, hoverBtn, mansionGrid, roomGlow, candleFlicker } from '../design/effects';
 
+/*
 // --- Layout constants ---
-const W = 800;
-const H = 560;
-
-interface Room {
-  id: string;
-  label: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-const ROOMS: Room[] = [
+const ROOMS_LEGACY = [
   { id: 'hall',      label: 'Salão Principal',       x: 200, y: 180, w: 220, h: 160 },
   { id: 'library',   label: 'Biblioteca',            x: 490, y: 80,  w: 180, h: 130 },
   { id: 'kitchen',   label: 'Cozinha',               x: 490, y: 280, w: 180, h: 120 },
@@ -35,7 +26,7 @@ const ROOMS: Room[] = [
 ];
 
 // Per-room ambient glow color
-const ROOM_GLOW: Record<string, number> = {
+const ROOM_GLOW_LEGACY: Record<string, number> = {
   hall:      PALETTE.room.hall,
   library:   PALETTE.room.library,
   kitchen:   PALETTE.room.kitchen,
@@ -45,7 +36,7 @@ const ROOM_GLOW: Record<string, number> = {
 };
 
 // NPC starting positions (center of each room)
-const NPC_POSITIONS: Record<string, { x: number; y: number }> = {
+const NPC_POSITIONS_LEGACY: Record<string, { x: number; y: number }> = {
   helena:  { x: 510, y: 145 },
   bento:   { x: 250, y: 250 },
   marina:  { x: 540, y: 335 },
@@ -55,7 +46,7 @@ const NPC_POSITIONS: Record<string, { x: number; y: number }> = {
 };
 
 // Clue pickup positions
-const CLUE_POSITIONS: Record<string, { x: number; y: number }> = {
+const CLUE_POSITIONS_LEGACY: Record<string, { x: number; y: number }> = {
   clue_glove:     { x: 550, y: 120 },
   clue_note:      { x: 510, y: 315 },
   clue_footprint: { x: 130, y: 155 },
@@ -63,12 +54,13 @@ const CLUE_POSITIONS: Record<string, { x: number; y: number }> = {
   clue_map:       { x: 220, y: 200 },
   clue_candle:    { x: 540, y: 455 },
 };
+*/
 
 export class GameScene extends Phaser.Scene {
   private player!: Player;
   private npcs: NPC[] = [];
   private walls!: Phaser.Physics.Arcade.StaticGroup;
-  private clueMarkers: Map<string, Phaser.GameObjects.Rectangle> = new Map();
+  private clueMarkers: Map<string, Phaser.GameObjects.Image> = new Map();
 
   private dialogueSystem!: DialogueSystem;
   private clueSystem!: ClueSystem;
@@ -79,14 +71,15 @@ export class GameScene extends Phaser.Scene {
   private dialogueBox!: DialogueBox;
   private cluePanel!: CluePanel;
 
-  private currentDay: number = 1;
+  private currentDay = 1;
   private aliveNPCs: NPCData[] = [];
 
   private interactKey!: Phaser.Input.Keyboard.Key;
   private clueKey!: Phaser.Input.Keyboard.Key;
   private activeNPC: NPC | null = null;
   private nearClue: string | null = null;
-  private inputCooldown: number = 0;
+  private inputCooldown = 0;
+  private councilTriggered = false;
 
   constructor() {
     super({ key: 'GameScene' });
@@ -100,7 +93,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
+    ensureRuntimeTextures(this);
     fadeIn(this);
+    this.physics.world.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
     this.dialogueSystem = new DialogueSystem();
     this.clueSystem = new ClueSystem();
@@ -122,14 +117,19 @@ export class GameScene extends Phaser.Scene {
   // --- Map building ---
 
   private buildMap(): void {
-    // Base floor
-    this.add.rectangle(W / 2, H / 2, W, H, PALETTE.bg.mansion).setDepth(-10);
+    this.add
+      .tileSprite(
+        WORLD_WIDTH / 2,
+        WORLD_HEIGHT / 2,
+        WORLD_WIDTH,
+        WORLD_HEIGHT,
+        TEXTURE_KEYS.floor,
+      )
+      .setTint(PALETTE.bg.mansion)
+      .setDepth(-11);
 
-    // Grid texture overlay
-    mansionGrid(this, W, H);
-
-    // Sparse ambient dust
-    spawnDust(this, W, H, 12);
+    mansionGrid(this, WORLD_WIDTH, WORLD_HEIGHT);
+    spawnDust(this, WORLD_WIDTH, WORLD_HEIGHT, 12);
 
     this.walls = this.physics.add.staticGroup();
 
@@ -137,29 +137,23 @@ export class GameScene extends Phaser.Scene {
       const cx = room.x + room.w / 2;
       const cy = room.y + room.h / 2;
 
-      // Room floor
-      this.add.rectangle(cx, cy, room.w, room.h, PALETTE.bg.mansionRoom).setDepth(-9);
-      // Inner floor highlight
-      this.add.rectangle(cx, cy, room.w - 8, room.h - 8, 0x1e1a2e, 0.4).setDepth(-8);
+      this.add
+        .tileSprite(cx, cy, room.w, room.h, room.floorTexture)
+        .setDepth(-9)
+        .setAlpha(room.id === 'garden' ? 0.95 : 1);
+      this.add
+        .rectangle(cx, cy, room.w - 10, room.h - 10, 0x1e1a2e, room.id === 'garden' ? 0.2 : 0.3)
+        .setDepth(-8);
 
-      // Per-room ambient color glow
-      const glowColor = ROOM_GLOW[room.id];
-      if (glowColor) {
-        const glowRadius = Math.min(room.w, room.h) * 0.42;
-        roomGlow(this, cx, cy, glowColor, glowRadius);
-      }
+      roomGlow(this, cx, cy, room.glowColor, Math.min(room.w, room.h) * 0.42);
 
-      // Candle in library and council room for extra warmth
       if (room.id === 'library' || room.id === 'council') {
         candleFlicker(this, cx - room.w * 0.38, cy);
         candleFlicker(this, cx + room.w * 0.38, cy);
       }
 
-      // Walls (4 sides)
-      this.addWall(room.x, cy, 4, room.h);
-      this.addWall(room.x + room.w, cy, 4, room.h);
-      this.addWall(cx, room.y, room.w, 4);
-      this.addWall(cx, room.y + room.h, room.w, 4);
+      this.addRoomWalls(room);
+      this.addDoorGlow(room);
 
       this.add
         .text(cx, room.y + 10, room.label, {
@@ -171,10 +165,87 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private addRoomWalls(room: (typeof ROOMS)[number]): void {
+    const leftDoors = room.doorways.filter((door) => door.side === 'left');
+    const rightDoors = room.doorways.filter((door) => door.side === 'right');
+    const topDoors = room.doorways.filter((door) => door.side === 'top');
+    const bottomDoors = room.doorways.filter((door) => door.side === 'bottom');
+
+    this.addVerticalWall(room.x, room.y, room.h, leftDoors);
+    this.addVerticalWall(room.x + room.w, room.y, room.h, rightDoors);
+    this.addHorizontalWall(room.x, room.y, room.w, topDoors);
+    this.addHorizontalWall(room.x, room.y + room.h, room.w, bottomDoors);
+  }
+
+  private addVerticalWall(
+    x: number,
+    top: number,
+    height: number,
+    doorways: Array<{ offset: number; size?: number }>,
+  ): void {
+    const sorted = [...doorways].sort((a, b) => a.offset - b.offset);
+    let start = top;
+
+    for (const doorway of sorted) {
+      const size = doorway.size ?? 34;
+      const doorTop = Phaser.Math.Clamp(top + doorway.offset - size / 2, top, top + height);
+      const doorBottom = Phaser.Math.Clamp(top + doorway.offset + size / 2, top, top + height);
+      if (doorTop > start) {
+        this.addWall(x, (start + doorTop) / 2, WALL_THICKNESS, doorTop - start);
+      }
+      start = doorBottom;
+    }
+
+    if (start < top + height) {
+      this.addWall(x, (start + top + height) / 2, WALL_THICKNESS, top + height - start);
+    }
+  }
+
+  private addHorizontalWall(
+    left: number,
+    y: number,
+    width: number,
+    doorways: Array<{ offset: number; size?: number }>,
+  ): void {
+    const sorted = [...doorways].sort((a, b) => a.offset - b.offset);
+    let start = left;
+
+    for (const doorway of sorted) {
+      const size = doorway.size ?? 34;
+      const doorLeft = Phaser.Math.Clamp(left + doorway.offset - size / 2, left, left + width);
+      const doorRight = Phaser.Math.Clamp(left + doorway.offset + size / 2, left, left + width);
+      if (doorLeft > start) {
+        this.addWall((start + doorLeft) / 2, y, doorLeft - start, WALL_THICKNESS);
+      }
+      start = doorRight;
+    }
+
+    if (start < left + width) {
+      this.addWall((start + left + width) / 2, y, left + width - start, WALL_THICKNESS);
+    }
+  }
+
+  private addDoorGlow(room: (typeof ROOMS)[number]): void {
+    for (const doorway of room.doorways) {
+      const size = doorway.size ?? 34;
+      if (doorway.side === 'left' || doorway.side === 'right') {
+        const x = doorway.side === 'left' ? room.x : room.x + room.w;
+        const y = room.y + doorway.offset;
+        this.add.rectangle(x, y, 8, size - 6, room.glowColor, 0.18).setDepth(-7);
+      } else {
+        const x = room.x + doorway.offset;
+        const y = doorway.side === 'top' ? room.y : room.y + room.h;
+        this.add.rectangle(x, y, size - 6, 8, room.glowColor, 0.18).setDepth(-7);
+      }
+    }
+  }
+
   private addWall(x: number, y: number, w: number, h: number): void {
-    const rect = this.add.rectangle(x, y, w, h, PALETTE.bg.wall).setDepth(-9);
-    this.physics.add.existing(rect, true);
-    this.walls.add(rect);
+    const wall = this.add
+      .tileSprite(x, y, Math.max(w, 4), Math.max(h, 4), TEXTURE_KEYS.wall)
+      .setDepth(-8);
+    this.physics.add.existing(wall, true);
+    this.walls.add(wall);
   }
 
   // --- Spawning ---
@@ -187,8 +258,7 @@ export class GameScene extends Phaser.Scene {
   private spawnNPCs(): void {
     this.npcs = [];
     for (const npcData of this.aliveNPCs) {
-      const pos = NPC_POSITIONS[npcData.id];
-      if (!pos) continue;
+      const pos = getNPCSpawnPosition(npcData);
       const npc = new NPC(this, pos.x, pos.y, npcData);
       this.npcs.push(npc);
     }
@@ -201,8 +271,9 @@ export class GameScene extends Phaser.Scene {
       if (!clue || clue.dayAvailable > this.currentDay || clue.collected) continue;
 
       const marker = this.add
-        .rectangle(pos.x, pos.y, SIZES.clueMarker, SIZES.clueMarker, 0xffee44)
-        .setDepth(2);
+        .image(pos.x, pos.y, TEXTURE_KEYS.clue)
+        .setDepth(2)
+        .setScale(0.9);
 
       // Bob up and down
       this.tweens.add({
@@ -227,7 +298,7 @@ export class GameScene extends Phaser.Scene {
 
       // Golden glow ring behind marker
       const glowRing = this.add
-        .circle(pos.x, pos.y, SIZES.clueMarker + 6, 0xffee44, 0.08)
+        .circle(pos.x, pos.y, SIZES.clueMarker + 8, 0xffee44, 0.08)
         .setDepth(1);
       this.tweens.add({
         targets: glowRing,
@@ -240,14 +311,15 @@ export class GameScene extends Phaser.Scene {
       });
 
       marker.setData('clueId', id);
+      marker.setData('glowRing', glowRing);
       this.clueMarkers.set(id, marker);
     }
   }
 
   private setupUI(): void {
-    this.hud = new HUD(this, W);
-    this.dialogueBox = new DialogueBox(this, W, H);
-    this.cluePanel = new CluePanel(this, W, H);
+    this.hud = new HUD(this, WORLD_WIDTH);
+    this.dialogueBox = new DialogueBox(this, WORLD_WIDTH, WORLD_HEIGHT);
+    this.cluePanel = new CluePanel(this, WORLD_WIDTH, WORLD_HEIGHT);
     this.hud.setDay(this.currentDay);
     this.hud.setClueCount(this.clueSystem.getCollected().length);
   }
@@ -290,7 +362,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (!this.dialogueBox.isVisible() && !this.cluePanel.isVisible()) {
-      this.player.update();
+      this.player.update(delta);
       this.checkProximity();
     } else {
       this.player.freeze();
@@ -346,6 +418,11 @@ export class GameScene extends Phaser.Scene {
         const marker = this.clueMarkers.get(this.nearClue);
         if (marker) {
           this.tweens.killTweensOf(marker);
+          const glowRing = marker.getData('glowRing') as Phaser.GameObjects.Arc | undefined;
+          if (glowRing) {
+            this.tweens.killTweensOf(glowRing);
+            glowRing.destroy();
+          }
           burst(this, marker.x, marker.y, SPECTACLE.burstCount, PALETTE.particle.cluePickup);
           this.cameras.main.shake(80, 0.005);
           marker.setVisible(false);
@@ -366,8 +443,6 @@ export class GameScene extends Phaser.Scene {
       this.checkGoToCouncil();
     }
   }
-
-  private councilTriggered = false;
 
   private checkGoToCouncil(): void {
     if (this.councilTriggered) return;

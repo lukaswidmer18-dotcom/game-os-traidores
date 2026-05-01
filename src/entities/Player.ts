@@ -2,10 +2,10 @@ import Phaser from 'phaser';
 import { SIZES } from '../design/constants';
 
 const SPEED = 120;
-const PLAYER_COLOR = 0xffffff;
+type Facing = 'down' | 'up' | 'left' | 'right';
 
 export class Player {
-  readonly sprite: Phaser.GameObjects.Rectangle;
+  readonly sprite: Phaser.Physics.Arcade.Sprite;
   private glow: Phaser.GameObjects.Arc;
   private aura: Phaser.GameObjects.Arc;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -15,6 +15,9 @@ export class Player {
     left: Phaser.Input.Keyboard.Key;
     right: Phaser.Input.Keyboard.Key;
   };
+  private facing: Facing = 'down';
+  private walkFrame = 0;
+  private walkElapsed = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     // Soft white glow behind the player
@@ -32,10 +35,13 @@ export class Player {
     });
 
     // Main sprite — rectangle kept for physics consistency
-    this.sprite = scene.add
-      .rectangle(x, y, SIZES.player, SIZES.player, PLAYER_COLOR)
-      .setDepth(5);
-    scene.physics.add.existing(this.sprite);
+    this.sprite = scene.physics.add
+      .sprite(x, y, 'player-down-0')
+      .setDepth(5)
+      .setScale(1.45);
+    const body = this.sprite.body as Phaser.Physics.Arcade.Body;
+    body.setSize(12, 16);
+    this.sprite.setCollideWorldBounds(true);
 
     // Expanding aura ring — "sonar pulse" to show player position
     this.aura = scene.add
@@ -68,22 +74,29 @@ export class Player {
   get x(): number { return this.sprite.x; }
   get y(): number { return this.sprite.y; }
 
-  update(): void {
-    const vx =
+  update(delta: number): void {
+    let vx =
       this.cursors.left.isDown || this.wasd.left.isDown
         ? -SPEED
         : this.cursors.right.isDown || this.wasd.right.isDown
           ? SPEED
           : 0;
 
-    const vy =
+    let vy =
       this.cursors.up.isDown || this.wasd.up.isDown
         ? -SPEED
         : this.cursors.down.isDown || this.wasd.down.isDown
           ? SPEED
           : 0;
 
+    if (vx !== 0 && vy !== 0) {
+      vx *= Math.SQRT1_2;
+      vy *= Math.SQRT1_2;
+    }
+
+    this.updateFacing(vx, vy);
     this.body.setVelocity(vx, vy);
+    this.updateTexture(delta, vx !== 0 || vy !== 0);
 
     // Keep visual effects centered on the sprite
     this.glow.setPosition(this.sprite.x, this.sprite.y);
@@ -92,5 +105,36 @@ export class Player {
 
   freeze(): void {
     this.body.setVelocity(0, 0);
+    this.walkFrame = 0;
+    this.walkElapsed = 0;
+    this.sprite.setTexture(`player-${this.facing}-0`);
+  }
+
+  private updateFacing(vx: number, vy: number): void {
+    if (Math.abs(vx) > Math.abs(vy)) {
+      if (vx < 0) this.facing = 'left';
+      if (vx > 0) this.facing = 'right';
+      return;
+    }
+
+    if (vy < 0) this.facing = 'up';
+    if (vy > 0) this.facing = 'down';
+  }
+
+  private updateTexture(delta: number, moving: boolean): void {
+    if (!moving) {
+      this.walkFrame = 0;
+      this.walkElapsed = 0;
+      this.sprite.setTexture(`player-${this.facing}-0`);
+      return;
+    }
+
+    this.walkElapsed += delta;
+    if (this.walkElapsed >= 170) {
+      this.walkElapsed = 0;
+      this.walkFrame = this.walkFrame === 0 ? 1 : 0;
+    }
+
+    this.sprite.setTexture(`player-${this.facing}-${this.walkFrame}`);
   }
 }

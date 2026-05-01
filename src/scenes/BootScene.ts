@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { STORY_DAYS } from '../data/storyDays';
+import { ensureRuntimeTextures } from '../assets/runtimeTextures';
 import { PALETTE } from '../design/constants';
 import { fadeIn, flash, fadeOutTo, spawnDust, hoverBtn, burst, candleFlicker } from '../design/effects';
 
@@ -12,6 +12,7 @@ export class BootScene extends Phaser.Scene {
     const { width, height } = this.scale;
     const cx = width / 2;
 
+    ensureRuntimeTextures(this);
     fadeIn(this);
 
     // Background
@@ -85,7 +86,7 @@ export class BootScene extends Phaser.Scene {
 
     // Story intro
     const intro = this.add
-      .text(cx, height * 0.46, STORY_DAYS[0].intro, {
+      .text(cx, height * 0.46, 'Voce chega a Mansao Velhart. Cada acontecimento importa. Observe, pergunte e leve sua leitura ao Conselho.', {
         fontSize: '11px',
         color: PALETTE.text.secondary,
         wordWrap: { width: width * 0.68 },
@@ -105,7 +106,7 @@ export class BootScene extends Phaser.Scene {
       .setDepth(4);
 
     const ctrl1 = this.add
-      .text(cx, height * 0.64, 'Mover: WASD / Setas', {
+      .text(cx, height * 0.64, 'Escolher: clique nos suspeitos e acontecimentos', {
         fontSize: '10px',
         color: PALETTE.text.dim,
       })
@@ -114,7 +115,7 @@ export class BootScene extends Phaser.Scene {
       .setDepth(5);
 
     const ctrl2 = this.add
-      .text(cx, height * 0.70, 'Interagir: E    |    Pistas: C', {
+      .text(cx, height * 0.70, 'Avancar dialogo: E    |    Pistas: C', {
         fontSize: '10px',
         color: PALETTE.text.dim,
       })

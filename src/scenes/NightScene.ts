@@ -4,7 +4,7 @@ import { Clue } from '../data/clues';
 import { TrustSystem } from '../systems/TrustSystem';
 import { STORY_DAYS } from '../data/storyDays';
 import { PALETTE } from '../design/constants';
-import { fadeIn, fadeOutTo, drawStars, hoverBtn } from '../design/effects';
+import { fadeIn, fadeOutTo, drawTwinStars, fogRise, hoverBtn } from '../design/effects';
 
 export class NightScene extends Phaser.Scene {
   private day: number = 1;
@@ -41,29 +41,40 @@ export class NightScene extends Phaser.Scene {
     // Deep night background
     this.add.rectangle(cx, height / 2, width, height, PALETTE.bg.night);
 
-    // Stars
-    drawStars(this, width, height, 100);
+    // Twinkling stars — more atmospheric than static
+    drawTwinStars(this, width, height, 110);
 
-    // Moon
-    const moon = this.add.circle(width * 0.85, height * 0.12, 26, PALETTE.atmosphere.moon, 0.92).setDepth(-4);
-    const moonGlow = this.add.circle(width * 0.85, height * 0.12, 42, PALETTE.atmosphere.moon, 0.06).setDepth(-5);
+    // Moon with stronger glow
+    const moon = this.add
+      .circle(width * 0.85, height * 0.12, 28, PALETTE.atmosphere.moon, 0.92)
+      .setDepth(-4);
+    const moonGlow1 = this.add
+      .circle(width * 0.85, height * 0.12, 48, PALETTE.atmosphere.moon, 0.07)
+      .setDepth(-5);
+    const moonGlow2 = this.add
+      .circle(width * 0.85, height * 0.12, 70, PALETTE.atmosphere.moon, 0.03)
+      .setDepth(-6);
+
     this.tweens.add({
-      targets: [moon, moonGlow],
-      alpha: { from: 0.92, to: 0.72 },
-      duration: 2200,
+      targets: [moon, moonGlow1, moonGlow2],
+      alpha: { from: 0.92, to: 0.65 },
+      duration: 2400,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
     });
 
+    // Fog rising from the ground
+    fogRise(this, width, height);
+
     // Council result title
     const resultTitle = this.add
       .text(cx, height * 0.18, 'Resultado do Conselho', {
-        fontSize: '14px',
+        fontSize: '16px',
         color: PALETTE.text.title,
         fontStyle: 'bold',
         stroke: '#000000',
-        strokeThickness: 2,
+        strokeThickness: 3,
       })
       .setOrigin(0.5)
       .setAlpha(0);
@@ -77,8 +88,8 @@ export class NightScene extends Phaser.Scene {
       : `${this.eliminatedName} era inocente... O grupo errou.`;
 
     const councilText = this.add
-      .text(cx, height * 0.28, councilMsg, {
-        fontSize: '12px',
+      .text(cx, height * 0.29, councilMsg, {
+        fontSize: '13px',
         color: councilColor,
         wordWrap: { width: width * 0.72 },
         align: 'center',
@@ -90,8 +101,8 @@ export class NightScene extends Phaser.Scene {
 
     // Divider
     const divider = this.add.graphics().setAlpha(0).setDepth(1);
-    divider.lineStyle(1, 0x333355, 0.6);
-    divider.lineBetween(cx - 140, height * 0.41, cx + 140, height * 0.41);
+    divider.lineStyle(1, 0x333355, 0.7);
+    divider.lineBetween(cx - 150, height * 0.41, cx + 150, height * 0.41);
     this.tweens.add({ targets: divider, alpha: 1, duration: 400, delay: 600 });
 
     // Night passage label
@@ -99,8 +110,8 @@ export class NightScene extends Phaser.Scene {
 
     const nightLabel = this.add
       .text(cx, height * 0.47, '— A noite cai —', {
-        fontSize: '12px',
-        color: '#444466',
+        fontSize: '13px',
+        color: '#555577',
         fontStyle: 'italic',
       })
       .setOrigin(0.5)
@@ -111,7 +122,7 @@ export class NightScene extends Phaser.Scene {
     // Night elimination message
     const nightMsg = this.add
       .text(cx, height * 0.57, nightResult.message, {
-        fontSize: '11px',
+        fontSize: '12px',
         color: '#ff7777',
         wordWrap: { width: width * 0.72 },
         align: 'center',
@@ -158,7 +169,7 @@ export class NightScene extends Phaser.Scene {
     const nextStory = STORY_DAYS[nextDay - 1];
     const nextTitle = this.add
       .text(cx, height * 0.76, nextStory.title, {
-        fontSize: '13px',
+        fontSize: '14px',
         color: '#9999ff',
         fontStyle: 'bold',
       })
@@ -169,12 +180,12 @@ export class NightScene extends Phaser.Scene {
 
     const continueBtn = this.add
       .text(cx, height * 0.87, '[ PRÓXIMO DIA → ]', {
-        fontSize: '13px',
+        fontSize: '14px',
         color: PALETTE.text.golden,
         stroke: '#000000',
         strokeThickness: 2,
         backgroundColor: '#0d0a1e',
-        padding: { x: 10, y: 5 },
+        padding: { x: 12, y: 6 },
       })
       .setOrigin(0.5)
       .setAlpha(0)

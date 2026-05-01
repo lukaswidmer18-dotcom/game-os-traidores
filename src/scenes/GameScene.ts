@@ -10,7 +10,7 @@ import { HUD } from '../ui/HUD';
 import { DialogueBox } from '../ui/DialogueBox';
 import { CluePanel } from '../ui/CluePanel';
 import { PALETTE, SIZES, SPECTACLE } from '../design/constants';
-import { fadeIn, fadeOutTo, burst, spawnDust, hoverBtn, mansionGrid } from '../design/effects';
+import { fadeIn, fadeOutTo, burst, spawnDust, hoverBtn, mansionGrid, roomGlow, candleFlicker } from '../design/effects';
 
 // --- Layout constants ---
 const W = 800;
@@ -33,6 +33,16 @@ const ROOMS: Room[] = [
   { id: 'corridor',  label: 'Corredor dos Quartos',  x: 200, y: 400, w: 220, h: 80  },
   { id: 'council',   label: 'Mesa do Conselho',      x: 490, y: 420, w: 180, h: 100 },
 ];
+
+// Per-room ambient glow color
+const ROOM_GLOW: Record<string, number> = {
+  hall:      PALETTE.room.hall,
+  library:   PALETTE.room.library,
+  kitchen:   PALETTE.room.kitchen,
+  garden:    PALETTE.room.garden,
+  corridor:  PALETTE.room.corridor,
+  council:   PALETTE.room.council,
+};
 
 // NPC starting positions (center of each room)
 const NPC_POSITIONS: Record<string, { x: number; y: number }> = {
@@ -112,14 +122,14 @@ export class GameScene extends Phaser.Scene {
   // --- Map building ---
 
   private buildMap(): void {
-    // Base floor with richer dark color
+    // Base floor
     this.add.rectangle(W / 2, H / 2, W, H, PALETTE.bg.mansion).setDepth(-10);
 
     // Grid texture overlay
     mansionGrid(this, W, H);
 
     // Sparse ambient dust
-    spawnDust(this, W, H, 10);
+    spawnDust(this, W, H, 12);
 
     this.walls = this.physics.add.staticGroup();
 
@@ -127,10 +137,23 @@ export class GameScene extends Phaser.Scene {
       const cx = room.x + room.w / 2;
       const cy = room.y + room.h / 2;
 
-      // Room floor with slight inner glow
+      // Room floor
       this.add.rectangle(cx, cy, room.w, room.h, PALETTE.bg.mansionRoom).setDepth(-9);
-      // Inner floor highlight (subtle)
+      // Inner floor highlight
       this.add.rectangle(cx, cy, room.w - 8, room.h - 8, 0x1e1a2e, 0.4).setDepth(-8);
+
+      // Per-room ambient color glow
+      const glowColor = ROOM_GLOW[room.id];
+      if (glowColor) {
+        const glowRadius = Math.min(room.w, room.h) * 0.42;
+        roomGlow(this, cx, cy, glowColor, glowRadius);
+      }
+
+      // Candle in library and council room for extra warmth
+      if (room.id === 'library' || room.id === 'council') {
+        candleFlicker(this, cx - room.w * 0.38, cy);
+        candleFlicker(this, cx + room.w * 0.38, cy);
+      }
 
       // Walls (4 sides)
       this.addWall(room.x, cy, 4, room.h);
@@ -139,8 +162,8 @@ export class GameScene extends Phaser.Scene {
       this.addWall(cx, room.y + room.h, room.w, 4);
 
       this.add
-        .text(cx, room.y + 9, room.label, {
-          fontSize: '8px',
+        .text(cx, room.y + 10, room.label, {
+          fontSize: '9px',
           color: PALETTE.text.hint,
         })
         .setOrigin(0.5, 0)
@@ -184,22 +207,36 @@ export class GameScene extends Phaser.Scene {
       // Bob up and down
       this.tweens.add({
         targets: marker,
-        y: pos.y - 4,
-        duration: 700,
+        y: pos.y - 5,
+        duration: 650,
         yoyo: true,
         repeat: -1,
         ease: 'Sine.easeInOut',
       });
 
-      // Gentle glow pulse
+      // Glow pulse
       this.tweens.add({
         targets: marker,
-        alpha: { from: 0.7, to: 1 },
-        duration: 500,
+        alpha: { from: 0.6, to: 1 },
+        duration: 450,
         yoyo: true,
         repeat: -1,
         ease: 'Sine.easeInOut',
-        delay: 250,
+        delay: 225,
+      });
+
+      // Golden glow ring behind marker
+      const glowRing = this.add
+        .circle(pos.x, pos.y, SIZES.clueMarker + 6, 0xffee44, 0.08)
+        .setDepth(1);
+      this.tweens.add({
+        targets: glowRing,
+        alpha: 0.22,
+        scale: 1.3,
+        duration: 600,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
       });
 
       marker.setData('clueId', id);
@@ -309,9 +346,8 @@ export class GameScene extends Phaser.Scene {
         const marker = this.clueMarkers.get(this.nearClue);
         if (marker) {
           this.tweens.killTweensOf(marker);
-          // Burst then hide
           burst(this, marker.x, marker.y, SPECTACLE.burstCount, PALETTE.particle.cluePickup);
-          this.cameras.main.shake(80, 0.004);
+          this.cameras.main.shake(80, 0.005);
           marker.setVisible(false);
         }
         this.hud.setClueCount(this.clueSystem.getCollected().length);

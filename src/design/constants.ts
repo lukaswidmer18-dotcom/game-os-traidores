@@ -24,19 +24,32 @@ export const PALETTE = {
     vote: 0xcc2233,
     victory: 0x88ffaa,
     defeat: 0xff4455,
+    gold: 0xffdd44,
+    ember: 0xff7722,
   },
   atmosphere: {
     candle: 0xff9944,
     moon: 0xddeeff,
     star: 0xffffff,
+    fog: 0x8899cc,
+    windowLight: 0xff9944,
+  },
+  room: {
+    library:  0xff9944,
+    kitchen:  0xff8833,
+    garden:   0x44ff88,
+    hall:     0x9988ff,
+    corridor: 0xcc77ff,
+    council:  0xff2244,
   },
 };
 
 export const SIZES = {
-  player: 14,
-  npc: 16,
-  clueMarker: 10,
-  npcRing: 28,
+  player: 18,
+  npc: 14,
+  clueMarker: 12,
+  npcRing: 30,
+  playerGlow: 28,
 };
 
 export const TIMING = {
@@ -46,6 +59,8 @@ export const TIMING = {
   btnHover: 80,
   btnPress: 50,
   particleBurst: 350,
+  npcBob: 1300,
+  starTwinkle: 700,
 };
 
 export const SPECTACLE = {

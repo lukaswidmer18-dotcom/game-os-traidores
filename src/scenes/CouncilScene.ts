@@ -96,7 +96,7 @@ export class CouncilScene extends Phaser.Scene {
     this.tweens.add({ targets: titleObj, alpha: 1, duration: 400, ease: 'Quad.easeOut' });
 
     const sub = this.add
-      .text(cx, 58, 'Em quem você vota?', {
+      .text(cx, 58, this.run.isPlayerTraitor() ? 'Quem voce vai entregar ao Conselho?' : 'Em quem voce vota?', {
         fontFamily: FONT.family,
         fontSize: '14px',
         color: PALETTE.text.secondary,
@@ -176,7 +176,13 @@ export class CouncilScene extends Phaser.Scene {
         .setAlpha(0);
 
       const suspText = this.add
-        .text(x + 8, y + 10, `Suspeita: ${suspBar}`, {
+        .text(
+          x + 8,
+          y + 10,
+          this.run.isPlayerTraitor() && npc.role === 'traitor'
+            ? 'Seu parceiro'
+            : `Suspeita: ${suspBar}`,
+          {
           fontFamily: FONT.family,
           fontSize: '11px',
           color: suspColor,
@@ -248,25 +254,34 @@ export class CouncilScene extends Phaser.Scene {
       })
       .join('   ');
 
-    const remainingTraitors = newAlive.filter((n) => n.role === 'traitor').length;
-    const remainingFaithful = newAlive.filter((n) => n.role === 'faithful').length;
+    const remainingTraitors = this.run.getAliveTraitorNPCs(newAlive).length;
+    const remainingFaithful = this.run.getAliveFaithfulNPCs(newAlive).length;
 
-    if (remainingTraitors === 0) {
-      fadeOutTo(this, 'GameOverScene', {
-        outcome: 'victory',
-        message: `${eliminated.name} era um Traidor! Todos os Traidores foram descobertos. Vitória!`,
-      });
-      return;
+    if (this.run.isPlayerTraitor()) {
+      if (this.run.hasTraitorDominance(newAlive) || remainingFaithful === 0) {
+        fadeOutTo(this, 'GameOverScene', {
+          outcome: 'victory',
+          message: `${eliminated.name} caiu no Conselho. Os Fiéis perderam a maioria, e a mansão agora pertence aos Traidores.`,
+        });
+        return;
+      }
+    } else {
+      if (remainingTraitors === 0) {
+        fadeOutTo(this, 'GameOverScene', {
+          outcome: 'victory',
+          message: `${eliminated.name} era um Traidor! Todos os Traidores foram descobertos. Vitória!`,
+        });
+        return;
+      }
+
+      if (remainingTraitors >= remainingFaithful) {
+        fadeOutTo(this, 'GameOverScene', {
+          outcome: 'defeat',
+          message: `${eliminated.name} era um(a) ${eliminated.role === 'traitor' ? 'Traidor' : 'Fiel'}. Os Traidores dominam. Derrota!`,
+        });
+        return;
+      }
     }
-
-    if (remainingTraitors >= remainingFaithful) {
-      fadeOutTo(this, 'GameOverScene', {
-        outcome: 'defeat',
-        message: `${eliminated.name} era um(a) ${eliminated.role === 'traitor' ? 'Traidor' : 'Fiel'}. Os Traidores dominam. Derrota!`,
-      });
-      return;
-    }
-
     fadeOutTo(this, 'NightScene', {
       eliminatedId: eliminated.id,
       eliminatedName: eliminated.name,

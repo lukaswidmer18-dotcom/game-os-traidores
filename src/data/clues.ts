@@ -49,13 +49,14 @@ export function generateClues(npcs: NPCData[]): Clue[] {
   const traitors = npcs.filter((n) => n.role === 'traitor');
   const faithful = npcs.filter((n) => n.role === 'faithful');
 
-  if (traitors.length < 2 || faithful.length === 0) {
+  if (traitors.length < 1 || faithful.length === 0) {
     throw new Error(
-      `generateClues requer 2 traidores e ao menos 1 fiel (recebeu ${traitors.length} traidores, ${faithful.length} fiéis)`,
+      `generateClues requer ao menos 1 traidor NPC e 1 fiel (recebeu ${traitors.length} traidores, ${faithful.length} fiéis)`, 
     );
   }
 
-  const [t1, t2] = traitors;
+  const [t1] = traitors;
+  const t2 = traitors[1] ?? traitors[0];
   const victim = faithful[Math.floor(Math.random() * faithful.length)];
 
   return [

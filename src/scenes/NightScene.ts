@@ -187,28 +187,42 @@ export class NightScene extends Phaser.Scene {
 
     this.run.aliveNPCs = nightResult.newAlive;
 
+    const remainingFaithful = this.run.getAliveFaithfulNPCs().length;
+    if (remainingFaithful === 0 || this.run.hasTraitorDominance()) {
+      this.time.delayedCall(3200, () => {
+        fadeOutTo(this, 'GameOverScene', {
+          outcome: this.run.isPlayerTraitor() ? 'victory' : 'defeat',
+          message: this.run.isPlayerTraitor()
+            ? 'A noite terminou com os Fiéis sem força para reagir. Sua facção venceu.'
+            : 'A noite terminou com os Traidores no controle da mansão. Derrota!',
+        });
+      });
+      return;
+    }
+
     // Check final day
     const nextDay = this.run.day + 1;
     if (nextDay > MAX_DAYS) {
-      const traitors = nightResult.newAlive.filter((n) => n.role === 'traitor').length;
-      if (traitors > 0) {
-        this.time.delayedCall(3200, () => {
-          fadeOutTo(this, 'GameOverScene', {
-            outcome: 'defeat',
-            message: 'O tempo acabou. Os Traidores venceram.',
-          });
-        });
-      } else {
+      if (this.run.isPlayerTraitor()) {
         this.time.delayedCall(3200, () => {
           fadeOutTo(this, 'GameOverScene', {
             outcome: 'victory',
-            message: 'Todos os Traidores foram eliminados. Vitória!',
+            message: 'O tempo acabou e nenhum Fiel conseguiu expor você. Os Traidores venceram.',
+          });
+        });
+      } else {
+        const traitors = this.run.getAliveTraitorNPCs().length;
+        this.time.delayedCall(3200, () => {
+          fadeOutTo(this, 'GameOverScene', {
+            outcome: traitors > 0 ? 'defeat' : 'victory',
+            message: traitors > 0
+              ? 'O tempo acabou. Os Traidores venceram.'
+              : 'Todos os Traidores foram eliminados. Vitória!',
           });
         });
       }
       return;
     }
-
     // Next day preview
     const nextStory = STORY_DAYS[nextDay - 1];
     const nextTitle = this.add
@@ -259,6 +273,10 @@ export class NightScene extends Phaser.Scene {
 
     this.run.lastNightVictim = null;
 
+    if (this.run.isPlayerTraitor()) {
+      return this.resolveTraitorNight(aliveNPCs, faithful, traitors);
+    }
+
     if (traitors.length === 0 || faithful.length === 0) {
       return { message: 'A noite passou em silêncio.', playerEliminated: false, newAlive: [...aliveNPCs] };
     }
@@ -307,5 +325,48 @@ export class NightScene extends Phaser.Scene {
     this.run.reducePlayerThreat(10);
 
     return { message: msg, playerEliminated: false, newAlive };
+  }
+  private resolveTraitorNight(
+    aliveNPCs: NPCData[],
+    faithful: NPCData[],
+    traitorPartners: NPCData[],
+  ): {
+    message: string;
+    playerEliminated: boolean;
+    newAlive: NPCData[];
+  } {
+    if (faithful.length === 0) {
+      return { message: 'A noite passou em silêncio. Ninguém mais podia impedir você.', playerEliminated: false, newAlive: [...aliveNPCs] };
+    }
+
+    let target = faithful[0];
+    let highestSusp = -1;
+    for (const candidate of faithful) {
+      const suspicion = this.run.trustSystem.getSuspicion(candidate.id);
+      if (suspicion > highestSusp) {
+        highestSusp = suspicion;
+        target = candidate;
+      }
+    }
+
+    const newAlive = aliveNPCs.filter((n) => n.id !== target.id);
+    const partner = traitorPartners[0];
+    const message = partner
+      ? `Voce e ${partner.name} conduzem ${target.name} para longe dos outros. Ao amanhecer, restara apenas medo.`
+      : `Voce conduz ${target.name} para longe dos outros. Ao amanhecer, restara apenas medo.`;
+
+    this.run.lastNightVictim = target;
+    this.run.allies.delete(target.id);
+    this.run.logEvent(`${target.name} foi eliminado(a) pelos Traidores durante a noite.`);
+
+    if (traitorPartners.length > 0) {
+      const crimeClue = generateCrimeClue(target, traitorPartners, this.run.day);
+      if (crimeClue) {
+        this.run.clueSystem.addClue(crimeClue);
+      }
+    }
+
+    this.run.reducePlayerThreat(8);
+    return { message, playerEliminated: false, newAlive };
   }
 }

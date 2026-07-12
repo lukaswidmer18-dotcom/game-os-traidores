@@ -6,6 +6,8 @@ import { TrustSystem } from './TrustSystem';
 /** Ações por dia (pergunta ou pista = 1). Esgotar força o Conselho. */
 export const ACTIONS_PER_DAY = 6;
 
+export type PlayerRole = 'investigator' | 'traitor';
+
 /**
  * Estado de uma partida (run). Criado uma vez ao iniciar o jogo e
  * compartilhado por todas as cenas, para que confiança, suspeita,
@@ -14,6 +16,7 @@ export const ACTIONS_PER_DAY = 6;
 export class RunState {
   readonly trustSystem: TrustSystem;
   readonly clueSystem: ClueSystem;
+  readonly playerRole: PlayerRole;
   aliveNPCs: NPCData[];
   day = 1;
 
@@ -39,8 +42,9 @@ export class RunState {
   /** Elenco completo da partida (inclui eliminados), com papéis sorteados. */
   readonly roster: NPCData[];
 
-  constructor() {
-    this.aliveNPCs = assignRandomRoles(NPC_DATA);
+  constructor(playerRole: PlayerRole = 'investigator') {
+    this.playerRole = playerRole;
+    this.aliveNPCs = assignRandomRoles(NPC_DATA, playerRole);
     this.roster = this.aliveNPCs.map((n) => ({ ...n }));
     this.trustSystem = new TrustSystem();
     this.trustSystem.initialize(this.aliveNPCs);
@@ -58,12 +62,34 @@ export class RunState {
   reducePlayerThreat(amount: number): void {
     this.playerThreat = Math.max(0, this.playerThreat - amount);
   }
+
+  isPlayerTraitor(): boolean {
+    return this.playerRole === 'traitor';
+  }
+
+  getAliveTraitorNPCs(npcs: NPCData[] = this.aliveNPCs): NPCData[] {
+    return npcs.filter((n) => n.role === 'traitor');
+  }
+
+  getAliveFaithfulNPCs(npcs: NPCData[] = this.aliveNPCs): NPCData[] {
+    return npcs.filter((n) => n.role === 'faithful');
+  }
+
+  getTraitorSideCount(npcs: NPCData[] = this.aliveNPCs): number {
+    return this.getAliveTraitorNPCs(npcs).length + (this.isPlayerTraitor() ? 1 : 0);
+  }
+
+  hasTraitorDominance(npcs: NPCData[] = this.aliveNPCs): boolean {
+    const faithful = this.getAliveFaithfulNPCs(npcs).length;
+    return faithful > 0 && this.getTraitorSideCount(npcs) >= faithful;
+  }
 }
 
-/** Sorteia 2 Traidores entre os NPCs; os demais são Fiéis. */
-function assignRandomRoles(npcs: NPCData[]): NPCData[] {
+/** Sorteia Traidores entre os NPCs; se o jogador for Traidor, ele conta como um dos dois. */
+function assignRandomRoles(npcs: NPCData[], playerRole: PlayerRole): NPCData[] {
   const shuffled = [...npcs].sort(() => Math.random() - 0.5);
-  const traitorIds = new Set(shuffled.slice(0, 2).map((n) => n.id));
+  const npcTraitorCount = playerRole === 'traitor' ? 1 : 2;
+  const traitorIds = new Set(shuffled.slice(0, npcTraitorCount).map((n) => n.id));
 
   return npcs.map((npc) => ({
     ...npc,
@@ -74,8 +100,8 @@ function assignRandomRoles(npcs: NPCData[]): NPCData[] {
 let currentRun: RunState | null = null;
 
 /** Inicia uma partida nova (papéis re-sorteados, estado zerado). */
-export function startNewRun(): RunState {
-  currentRun = new RunState();
+export function startNewRun(playerRole: PlayerRole = 'investigator'): RunState {
+  currentRun = new RunState(playerRole);
   return currentRun;
 }
 

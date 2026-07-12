@@ -72,8 +72,9 @@ export class Journal {
     // Lombada central — sensação de livro aberto
     const spine = this.scene.add.rectangle(0, 0, 2, BOOK_H - 24, 0x2c2244, 0.8);
 
+    const titleLabel = this.run.isPlayerTraitor() ? 'LIVRO DO TRAIDOR' : 'LIVRO DO INVESTIGADOR';
     const title = this.scene.add
-      .text(-BOOK_W / 2 + 20, -BOOK_H / 2 + 14, 'LIVRO DO INVESTIGADOR', {
+      .text(-BOOK_W / 2 + 20, -BOOK_H / 2 + 14, titleLabel, {
         fontFamily: FONT.family,
         fontSize: '16px',
         color: '#e8d9a8',
@@ -219,16 +220,20 @@ export class Journal {
       this.contentGroup!.add([frame, portrait]);
     });
 
-    // Sobre você
+    // Sobre voce
     const allies = this.run.roster.filter(
       (n) => this.run.allies.has(n.id) && this.run.isAlive(n.id),
     ).length;
     const threat =
-      this.run.playerThreat >= 40 ? 'ALTO' : this.run.playerThreat >= 18 ? 'médio' : 'baixo';
+      this.run.playerThreat >= 40 ? 'ALTO' : this.run.playerThreat >= 18 ? 'medio' : 'baixo';
+    const partner = this.run.getAliveTraitorNPCs()[0];
+    const selfLine = this.run.isPlayerTraitor()
+      ? `Sobre voce -- papel: Traidor   |   parceiro: ${partner?.name ?? 'sozinho'}`
+      : `Sobre voce -- aliados: ${allies}   |   risco noturno: ${threat}`;
     this.addText(
       0,
       BOOK_H / 2 - 34,
-      `Sobre você — aliados: ${allies}   |   risco noturno: ${threat}`,
+      selfLine,
       '#e8d9a8',
       12,
     ).setOrigin(0.5, 0);

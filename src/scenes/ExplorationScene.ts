@@ -1,4 +1,4 @@
-﻿import Phaser from 'phaser';
+import Phaser from 'phaser';
 import { ensureRuntimeTextures, TEXTURE_KEYS } from '../assets/runtimeTextures';
 import { ensurePortraits } from '../assets/portraits';
 import { ensureCharacterArt } from '../assets/characterArt';
@@ -849,7 +849,7 @@ export class ExplorationScene extends Phaser.Scene {
 
     this.hud.setDay(this.run.day);
     this.hud.setClueCount(this.run.clueSystem.getCollected().length);
-    this.hud.setThreat(this.describeThreat());
+    this.updateThreatHud();
     this.hud.setActions(this.actionsTaken, ACTIONS_PER_DAY);
   }
 
@@ -866,6 +866,19 @@ export class ExplorationScene extends Phaser.Scene {
     const crimeNote = victim
       ? ` O corpo de ${victim.name} foi encontrado — investigue a cena no cômodo onde ele(a) ficava.`
       : '';
+
+    if (this.run.isPlayerTraitor()) {
+      const partner = this.run.getAliveTraitorNPCs()[0];
+      const partnerNote = partner
+        ? ` Seu parceiro nas sombras é ${partner.name}. Proteja-o ou use-o como isca se precisar.`
+        : ' Seu antigo parceiro caiu. Agora a mansão inteira precisa acreditar na sua inocência.';
+      this.dialogueBox.show(
+        'Voz interior',
+        story.intro + crimeNote + partnerNote + ' Sabote a investigação e leve os Fiéis a se destruírem no Conselho.',
+      );
+      return;
+    }
+
     this.dialogueBox.show('Narrador', story.intro + crimeNote);
   }
 
@@ -1076,7 +1089,7 @@ export class ExplorationScene extends Phaser.Scene {
     }
 
     this.hud.setClueCount(this.run.clueSystem.getCollected().length);
-    this.hud.setThreat(this.describeThreat());
+    this.updateThreatHud();
     this.hud.setActions(this.actionsTaken, ACTIONS_PER_DAY);
     this.checkCouncilUnlock();
 
@@ -1087,6 +1100,18 @@ export class ExplorationScene extends Phaser.Scene {
   }
 
   private handleAlliance(npc: NPCData): string {
+    if (this.run.isPlayerTraitor() && npc.role === 'traitor') {
+      this.run.allies.add(npc.id);
+      this.run.logEvent(`${npc.name} confirmou o pacto secreto com você.`);
+      this.spokenTo.add(npc.id);
+      this.askedQuestions.add(this.questionKey(npc.id, 'alliance'));
+      this.actionsTaken++;
+      this.updateThreatHud();
+      this.hud.setActions(this.actionsTaken, ACTIONS_PER_DAY);
+      this.checkCouncilUnlock();
+      return `"Estamos alinhados." ${npc.name} baixa a voz: escolha um Fiel para cair, e eu ajudo a empurrar a suspeita.`;
+    }
+
     const outcome = this.interrogationSystem.proposeAlliance(
       npc,
       this.run.trustSystem.getTrust(npc.id),
@@ -1110,7 +1135,7 @@ export class ExplorationScene extends Phaser.Scene {
 
     this.spokenTo.add(npc.id);
     this.actionsTaken++;
-    this.hud.setThreat(this.describeThreat());
+    this.updateThreatHud();
     this.hud.setActions(this.actionsTaken, ACTIONS_PER_DAY);
     this.checkCouncilUnlock();
 
@@ -1160,8 +1185,21 @@ export class ExplorationScene extends Phaser.Scene {
     return `${trustLabel}  |  ${suspicionLabel}`;
   }
 
+  private updateThreatHud(): void {
+    this.hud.setThreat(
+      this.describeThreat(),
+      this.run.isPlayerTraitor() ? 'DISFARCE' : 'RISCO',
+      this.run.isPlayerTraitor(),
+    );
+  }
+
   private describeThreat(): string {
     const threat = this.run.playerThreat;
+    if (this.run.isPlayerTraitor()) {
+      if (threat >= 40) return 'baixo';
+      if (threat >= 18) return 'medio';
+      return 'alto';
+    }
     if (threat >= 40) return 'ALTO';
     if (threat >= 18) return 'medio';
     return 'baixo';

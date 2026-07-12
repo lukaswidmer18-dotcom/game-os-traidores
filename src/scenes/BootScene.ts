@@ -4,7 +4,7 @@ import { ensurePortraits, portraitKey } from '../assets/portraits';
 import { base, preloadTileArt, SHEET_KEYS } from '../assets/tileArt';
 import { ensureCharacterArt } from '../assets/characterArt';
 import { NPC_DATA } from '../data/npcs';
-import { startNewRun } from '../systems/RunState';
+import { PlayerRole, startNewRun } from '../systems/RunState';
 import { FONT, PALETTE } from '../design/constants';
 import { fadeIn, flash, fadeOutTo, spawnDust, burst, candleFlicker } from '../design/effects';
 
@@ -12,6 +12,8 @@ const GOLD_LIGHT = 0xf0d483;
 const GOLD_DARK = 0xbc7a2f;
 
 export class BootScene extends Phaser.Scene {
+  private selectedPlayerRole: PlayerRole = 'investigator';
+
   constructor() {
     super({ key: 'BootScene' });
   }
@@ -54,6 +56,7 @@ export class BootScene extends Phaser.Scene {
     this.buildTitleBlock(cx, height);
     this.buildSuspectGallery(cx, height * 0.47);
     this.buildControlsPanel(cx, width, height);
+    this.buildRoleSelector(cx, height);
     this.buildStartButton(cx, height);
     this.spawnGuestParade(width, height);
   }
@@ -213,11 +216,11 @@ export class BootScene extends Phaser.Scene {
 
   /** Painel de controles: vidro escuro com rótulo em caixa alta. */
   private buildControlsPanel(cx: number, width: number, height: number): void {
-    const panelY = height * 0.655;
+    const panelY = height * 0.625;
     const panelW = width * 0.62;
 
     const panel = this.add
-      .rectangle(cx, panelY, panelW, 64, 0x0d0a1e, 0.62)
+      .rectangle(cx, panelY, panelW, 58, 0x0d0a1e, 0.68)
       .setStrokeStyle(1, 0x3a2a5e)
       .setAlpha(0)
       .setDepth(4);
@@ -241,7 +244,7 @@ export class BootScene extends Phaser.Scene {
       .setDepth(6);
 
     const ctrl1 = this.add
-      .text(cx, panelY - 12, 'Andar: Setas ou WASD     Interagir: E     Livro: J     Pistas: C', {
+      .text(cx, panelY - 10, 'Andar: Setas ou WASD     Interagir: E     Livro: J     Pistas: C', {
         fontFamily: FONT.family,
         fontSize: '13px',
         color: PALETTE.text.secondary,
@@ -267,6 +270,114 @@ export class BootScene extends Phaser.Scene {
     this.tweens.add({ targets: [label, ctrl1, ctrl2], alpha: 1, duration: 400, delay: 1000 });
   }
 
+  /** Escolha de papel: jogar como investigador Fiel ou como um Traidor secreto. */
+  private buildRoleSelector(cx: number, height: number): void {
+    const y = height * 0.79;
+    const options: Array<{ role: PlayerRole; title: string; detail: string; x: number }> = [
+      {
+        role: 'investigator',
+        title: 'INVESTIGADOR',
+        detail: 'Descubra os Traidores',
+        x: cx - 128,
+      },
+      {
+        role: 'traitor',
+        title: 'TRAIDOR',
+        detail: 'Engane a mansao',
+        x: cx + 128,
+      },
+    ];
+
+    const boxes: Array<{
+      role: PlayerRole;
+      bg: Phaser.GameObjects.Rectangle;
+      title: Phaser.GameObjects.Text;
+      detail: Phaser.GameObjects.Text;
+    }> = [];
+
+    const refresh = () => {
+      for (const box of boxes) {
+        const selected = box.role === this.selectedPlayerRole;
+        box.bg.setFillStyle(selected ? 0x2b1632 : 0x100d20, selected ? 0.98 : 0.9);
+        box.bg.setStrokeStyle(selected ? 2 : 1, selected ? 0xd4a848 : 0x4a385f);
+        box.title.setColor(selected ? '#f0d483' : '#d8d4f0');
+        box.detail.setColor(selected ? '#e0cfa0' : '#8f89aa');
+      }
+    };
+
+    const label = this.add
+      .text(cx, y - 42, 'ESCOLHA SEU LADO', {
+        fontFamily: FONT.family,
+        fontSize: '10px',
+        color: '#a8853f',
+      })
+      .setResolution(FONT.resolution)
+      .setLetterSpacing(4)
+      .setOrigin(0.5)
+      .setAlpha(0)
+      .setDepth(6);
+
+    options.forEach((option, i) => {
+      const bg = this.add
+        .rectangle(option.x, y, 226, 56, 0x100d20, 0.9)
+        .setStrokeStyle(1, 0x4a385f)
+        .setAlpha(0)
+        .setDepth(5)
+        .setInteractive({ useHandCursor: true });
+
+      const title = this.add
+        .text(option.x, y - 12, option.title, {
+          fontFamily: FONT.family,
+          fontSize: '14px',
+          fontStyle: 'bold',
+          color: '#d8d4f0',
+        })
+        .setResolution(FONT.resolution)
+        .setLetterSpacing(2)
+        .setOrigin(0.5)
+        .setAlpha(0)
+        .setDepth(6);
+
+      const detail = this.add
+        .text(option.x, y + 12, option.detail, {
+          fontFamily: FONT.family,
+          fontSize: '11px',
+          color: '#8f89aa',
+        })
+        .setResolution(FONT.resolution)
+        .setOrigin(0.5)
+        .setAlpha(0)
+        .setDepth(6);
+
+      boxes.push({ role: option.role, bg, title, detail });
+
+      const select = () => {
+        this.selectedPlayerRole = option.role;
+        refresh();
+      };
+      bg.on('pointerdown', select);
+      title.setInteractive({ useHandCursor: true }).on('pointerdown', select);
+      detail.setInteractive({ useHandCursor: true }).on('pointerdown', select);
+
+      bg.on('pointerover', () => {
+        if (this.selectedPlayerRole !== option.role) bg.setStrokeStyle(1, 0x8a6d2f);
+      });
+      bg.on('pointerout', refresh);
+
+      this.tweens.add({ targets: [bg, title, detail], alpha: 1, duration: 350, delay: 1120 + i * 90 });
+    });
+
+    this.tweens.add({ targets: label, alpha: 1, duration: 350, delay: 1080 });
+    this.input.keyboard!.on('keydown-I', () => {
+      this.selectedPlayerRole = 'investigator';
+      refresh();
+    });
+    this.input.keyboard!.on('keydown-T', () => {
+      this.selectedPlayerRole = 'traitor';
+      refresh();
+    });
+    refresh();
+  }
   /** Botão COMEÇAR: gradiente, brilho pulsante e seta direcional. */
   private buildStartButton(cx: number, height: number): void {
     const y = height * 0.905;
@@ -316,7 +427,7 @@ export class BootScene extends Phaser.Scene {
       .setDepth(7)
       .setInteractive({ useHandCursor: true });
 
-    this.tweens.add({ targets: [bgGraphics, labelText, arrow], alpha: 1, duration: 400, delay: 1200 });
+    this.tweens.add({ targets: [bgGraphics, labelText, arrow], alpha: 1, duration: 400, delay: 1260 });
     this.tweens.add({
       targets: glow,
       alpha: { from: 0.5, to: 1 },
@@ -340,7 +451,7 @@ export class BootScene extends Phaser.Scene {
     });
 
     const onStart = () => {
-      startNewRun();
+      startNewRun(this.selectedPlayerRole);
       fadeOutTo(this, 'GameScene');
     };
     hitArea.on('pointerdown', () => {

@@ -79,16 +79,16 @@ export class HUD {
     this.interactHint.setText(text);
   }
 
-  setThreat(label: string): void {
+  setThreat(label: string, prefix = 'RISCO', inverted = false): void {
     if (!label) {
       this.threatText.setText('');
       return;
     }
     const level = label.toUpperCase();
-    this.threatText.setText(`RISCO ${level}`);
-    this.threatText.setColor(
-      level === 'ALTO' ? '#ff9977' : level === 'MEDIO' ? '#ddba77' : '#9ab89a',
-    );
+    this.threatText.setText(`${prefix} ${level}`);
+    const danger = inverted ? level === 'BAIXO' : level === 'ALTO';
+    const warning = level === 'MEDIO';
+    this.threatText.setColor(danger ? '#ff9977' : warning ? '#ddba77' : '#9ab89a');
   }
 
   setActions(used: number, max: number): void {

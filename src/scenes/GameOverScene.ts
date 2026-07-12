@@ -27,6 +27,7 @@ export class GameOverScene extends Phaser.Scene {
     spawnDust(this, width, height, 16);
 
     const isVictory = data.outcome === 'victory';
+    const isTraitorVictory = isVictory && data.message.includes('Traidores');
     const titleColor = isVictory ? PALETTE.text.success : PALETTE.text.danger;
     const titleText = isVictory ? 'VITÓRIA' : 'DERROTA';
     const particleColor = isVictory ? PALETTE.particle.victory : PALETTE.particle.defeat;
@@ -98,8 +99,8 @@ export class GameOverScene extends Phaser.Scene {
     // Outcome flavor line
     const flavorColor = isVictory ? PALETTE.text.success : '#ff6666';
     const flavorText = isVictory
-      ? '✦ A mansão está salva ✦'
-      : '✦ Os traidores venceram ✦';
+      ? (isTraitorVictory ? 'A mansao caiu em silencio' : 'A mansao esta salva')
+      : 'Os Traidores venceram';
     const flavor = this.add
       .text(cx, height * 0.62, flavorText, {
         fontFamily: FONT.family,

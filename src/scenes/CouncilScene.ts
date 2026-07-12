@@ -109,12 +109,19 @@ export class CouncilScene extends Phaser.Scene {
 
     this.tweens.add({ targets: sub, alpha: 1, duration: 400, delay: 150 });
 
-    // Clue summary
+    // Resumo de pistas compacto: só as mais recentes, com contador do resto.
+    // A lista completa vive no Livro do Investigador — aqui não pode empurrar
+    // os cartões de voto para fora da tela nem ficar atrás deles.
     const clues = this.run.clueSystem.getCollected();
+    let cluesBottom = 96;
     if (clues.length > 0) {
-      const clueText = clues.map((c) => `• ${c.description.slice(0, 60)}…`).join('\n');
+      const recent = clues.slice(-4);
+      const hidden = clues.length - recent.length;
+      const lines = recent.map((c) => `• ${c.description.slice(0, 68)}…`);
+      const header = hidden > 0 ? `Suas pistas mais recentes (+${hidden} no Livro):` : 'Suas pistas:';
+
       const clueObj = this.add
-        .text(cx, 84, 'Suas pistas:\n' + clueText, {
+        .text(cx, 84, `${header}\n${lines.join('\n')}`, {
           fontFamily: FONT.family,
           fontSize: '11px',
           color: '#9aabbc',
@@ -127,10 +134,11 @@ export class CouncilScene extends Phaser.Scene {
         .setAlpha(0);
 
       this.tweens.add({ targets: clueObj, alpha: 1, duration: 400, delay: 250 });
+      cluesBottom = 84 + clueObj.height;
     }
 
-    // Vote buttons
-    const btnY = 216;
+    // Vote buttons — sempre abaixo do bloco de pistas
+    const btnY = Math.max(216, cluesBottom + 52);
     const aliveNPCs = this.run.aliveNPCs;
     const cols = Math.min(3, aliveNPCs.length);
     const btnW = 150;

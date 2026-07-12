@@ -54,7 +54,7 @@ export class BootScene extends Phaser.Scene {
     });
 
     this.buildTitleBlock(cx, height);
-    this.buildSuspectGallery(cx, height * 0.47);
+    this.buildSuspectGallery(cx, height * 0.44);
     this.buildControlsPanel(cx, width, height);
     this.buildRoleSelector(cx, height);
     this.buildStartButton(cx, height);
@@ -216,7 +216,8 @@ export class BootScene extends Phaser.Scene {
 
   /** Painel de controles: vidro escuro com rótulo em caixa alta. */
   private buildControlsPanel(cx: number, width: number, height: number): void {
-    const panelY = height * 0.625;
+    // Abaixo da galeria de retratos (nomes + flutuação de +3px terminam ~0.56h)
+    const panelY = height * 0.655;
     const panelW = width * 0.62;
 
     const panel = this.add
@@ -502,11 +503,15 @@ export class BootScene extends Phaser.Scene {
     });
   }
 
-  /** Fachada da mansão com tiles reais: janelas acesas, porta e estandartes. */
+  /**
+   * Fachada da mansão como faixa de fundo no rodapé. Fica abaixo dos
+   * painéis de papel/botão (que ocupam 0.72h..0.94h) — só a silhueta e as
+   * janelas acesas aparecem, sem disputar espaço com a interface.
+   */
   private drawMansionFacade(cx: number, height: number, width: number): void {
     const g = this.add.graphics().setDepth(1).setAlpha(0.85);
     const baseY = height;
-    const silY = height * 0.76;
+    const silY = height * 0.88;
     const darkColor = 0x0a0716;
 
     g.fillStyle(darkColor, 1);
@@ -520,7 +525,8 @@ export class BootScene extends Phaser.Scene {
     g.fillTriangle(cx - 209, silY - 42, cx - 226, silY - 22, cx - 192, silY - 22);
     g.fillTriangle(cx + 209, silY - 42, cx + 192, silY - 22, cx + 226, silY - 22);
 
-    // Janelas de tile iluminadas sobre a silhueta
+    // Janelas de tile iluminadas sobre a silhueta (as centrais ficam atrás
+    // do botão COMEÇAR, que tem fundo opaco — só as laterais aparecem)
     const windows = [
       { x: cx - 110, y: silY + 26 },
       { x: cx - 45, y: silY + 26 },
@@ -547,18 +553,9 @@ export class BootScene extends Phaser.Scene {
       });
     });
 
-    // Janela em arco na torre central + porta dupla e estandartes
-    this.add.image(cx, silY - 22, SHEET_KEYS.base, base(45, 2)).setScale(1.8).setDepth(2);
-    this.add.image(cx - 9, silY + 74, SHEET_KEYS.base, base(30, 6)).setScale(1.8).setDepth(2);
-    this.add.image(cx + 9, silY + 74, SHEET_KEYS.base, base(31, 6)).setScale(1.8).setDepth(2);
-    this.add.image(cx - 34, silY + 66, SHEET_KEYS.base, base(49, 1)).setScale(1.6).setDepth(2);
-    this.add.image(cx + 34, silY + 66, SHEET_KEYS.base, base(49, 1)).setScale(1.6).setDepth(2);
-    candleFlicker(this, cx - 22, silY + 78);
-    candleFlicker(this, cx + 22, silY + 78);
-
     // Névoa subindo da base
     const fogG = this.add.graphics().setDepth(2);
     fogG.fillGradientStyle(0x1a1030, 0x1a1030, 0x1a1030, 0x1a1030, 0, 0, 0.55, 0.55);
-    fogG.fillRect(0, height * 0.86, width, height * 0.14);
+    fogG.fillRect(0, height * 0.9, width, height * 0.1);
   }
 }

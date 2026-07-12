@@ -108,5 +108,37 @@ export function generateClues(npcs: NPCData[]): Clue[] {
       dayAvailable: 3,
       collected: false,
     },
+    {
+      id: 'clue_sermon',
+      room: 'chapel',
+      description: `No banco da Capela, um missal aberto. Na margem, escrito a lápis: "Perdoai-me pelo que farei esta noite." A caligrafia inclinada lembra a de ${t1.name}.`,
+      contradictsNPC: t1.id,
+      dayAvailable: 2,
+      collected: false,
+    },
+    {
+      id: 'clue_ledger',
+      room: 'master',
+      description: `O livro-razão do anfitrião, aberto sobre a escrivaninha. Uma dívida enorme no nome de ${t2.name} — e a data de quitação é o último dia da competição.`,
+      contradictsNPC: t2.id,
+      dayAvailable: 2,
+      collected: false,
+    },
+    {
+      id: 'clue_ritual',
+      room: 'basement',
+      description: `Atrás dos caixotes do Porão, um manto negro dobrado com esmero. No bolso interno, um medalhão gravado: as iniciais completas de ${t1.name}.`,
+      revealsRole: t1.id,
+      dayAvailable: 2,
+      collected: false,
+    },
+    {
+      id: 'clue_crypt',
+      room: 'crypt',
+      description: `Sobre o túmulo central da Cripta, um pacto assinado com sangue seco. Dois nomes: um ilegível... o outro, sem dúvida, ${t2.name}.`,
+      revealsRole: t2.id,
+      dayAvailable: 3,
+      collected: false,
+    },
   ];
 }

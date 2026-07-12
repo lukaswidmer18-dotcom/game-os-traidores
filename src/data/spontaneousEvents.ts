@@ -37,9 +37,12 @@ function pickTwo(npcs: NPCData[]): [NPCData, NPCData] {
   return [first, pick(rest)];
 }
 
+/** Salas secretas/trancadas não aparecem em boatos — ninguém circula por elas. */
+const HIDDEN_ROOM_IDS = new Set(['basement', 'crypt']);
+
 function sightingEvent(npcs: NPCData[]): SpontaneousEvent {
   const npc = pick(npcs);
-  const room = pick(ROOMS);
+  const room = pick(ROOMS.filter((r) => !HIDDEN_ROOM_IDS.has(r.id)));
   const suspicious = npc.role === 'traitor';
 
   const texts = suspicious

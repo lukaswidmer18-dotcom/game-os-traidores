@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { ensurePortraits, portraitKey } from '../assets/portraits';
 import { VoteSystem } from '../systems/VoteSystem';
 import { getRun, RunState } from '../systems/RunState';
+import { audio } from '../systems/AudioSystem';
 import { FONT, PALETTE, SPECTACLE } from '../design/constants';
 import { fadeIn, fadeOutTo, burst, spawnDust, candleFlicker } from '../design/effects';
 
@@ -17,6 +18,7 @@ export class CouncilScene extends Phaser.Scene {
     this.run = getRun();
     this.voteSystem = new VoteSystem();
     ensurePortraits(this);
+    audio.startAmbient('council');
 
     const { width, height } = this.scale;
     const cx = width / 2;

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { FONT, PALETTE, SPECTACLE } from '../design/constants';
 import { fadeIn, flash, fadeOutTo, burst, slamIn, hoverBtn, spawnDust, victoryRain, defeatDrizzle } from '../design/effects';
+import { audio } from '../systems/AudioSystem';
 
 export class GameOverScene extends Phaser.Scene {
   constructor() {
@@ -20,6 +21,8 @@ export class GameOverScene extends Phaser.Scene {
     };
 
     fadeIn(this);
+    audio.stopAmbient();
+    audio.stinger(data.outcome === 'victory' ? 'victory' : 'defeat');
     this.time.delayedCall(100, () => flash(this));
 
     this.add.rectangle(cx, height / 2, width, height, PALETTE.bg.gameover);

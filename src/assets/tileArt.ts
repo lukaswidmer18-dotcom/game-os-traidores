@@ -45,6 +45,10 @@ export const ROOM_FLOOR_FRAMES: Record<string, number> = {
   corridor: base(25, 27), // tábuas claras
   greenhouse: base(21, 25), // grama de estufa
   council: base(45, 29), // tábuas escuras avermelhadas
+  chapel: base(44, 26), // mármore claro
+  master: base(25, 25), // tábuas de madeira
+  basement: base(30, 15), // pedra fria
+  crypt: base(30, 15), // pedra fria
 };
 
 export const WALL_FRAME = base(35, 15); // painel de madeira escura

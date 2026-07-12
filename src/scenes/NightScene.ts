@@ -4,10 +4,14 @@ import { generateCrimeClue } from '../data/clues';
 import { NPCData } from '../data/npcs';
 import { STORY_DAYS } from '../data/storyDays';
 import { getRun, RunState } from '../systems/RunState';
+import { audio } from '../systems/AudioSystem';
 import { FONT, PALETTE } from '../design/constants';
 import { fadeIn, fadeOutTo, drawTwinStars, fogRise, hoverBtn } from '../design/effects';
 
-const MAX_DAYS = 3;
+const MAX_DAYS = STORY_DAYS.length;
+
+/** Ação noturna do jogador Fiel. */
+type NightAction = 'lock' | 'watch' | 'sleep';
 
 export class NightScene extends Phaser.Scene {
   private run!: RunState;
@@ -34,6 +38,7 @@ export class NightScene extends Phaser.Scene {
 
   create(): void {
     this.run = getRun();
+    audio.startAmbient('night');
 
     const { width, height } = this.scale;
     const cx = width / 2;
@@ -142,38 +147,170 @@ export class NightScene extends Phaser.Scene {
     divider.lineBetween(cx - 150, height * 0.41, cx + 150, height * 0.41);
     this.tweens.add({ targets: divider, alpha: 1, duration: 400, delay: 600 });
 
-    // Night passage label
-    const nightResult = this.resolveNight();
+    // A noite agora é interativa: o jogador escolhe uma ação antes do desfecho
+    this.time.delayedCall(900, () => {
+      if (this.run.isPlayerTraitor()) {
+        this.showVictimChoice();
+      } else {
+        this.showNightActions();
+      }
+    });
+  }
 
-    const nightLabel = this.add
-      .text(cx, height * 0.47, '— A noite cai —', {
+  // --- Ação noturna do Fiel ---
+
+  private showNightActions(): void {
+    const { width, height } = this.scale;
+    const cx = width / 2;
+
+    const prompt = this.addFading(
+      cx,
+      height * 0.47,
+      'A noite cai. O que você faz?',
+      { fontSize: '15px', color: '#c8c8ea', fontStyle: 'italic' },
+      0,
+    );
+
+    const options: Array<{ action: NightAction; label: string; hint: string }> = [
+      {
+        action: 'lock',
+        label: '[ TRANCAR A PORTA ]',
+        hint: 'Seguro, mas você não verá nada',
+      },
+      {
+        action: 'watch',
+        label: '[ VIGIAR OS CORREDORES ]',
+        hint: 'Pode flagrar o assassino — ou ser visto',
+      },
+      {
+        action: 'sleep',
+        label: '[ DORMIR ]',
+        hint: 'Descansar e confiar na sorte',
+      },
+    ];
+
+    const buttons: Phaser.GameObjects.Text[] = [prompt];
+    options.forEach((option, i) => {
+      const x = cx + (i - 1) * width * 0.28;
+      const btn = this.add
+        .text(x, height * 0.56, option.label, {
+          fontFamily: FONT.family,
+          fontSize: '13px',
+          color: PALETTE.text.golden,
+          stroke: '#000000',
+          strokeThickness: 2,
+          backgroundColor: '#0d0a1e',
+          padding: { x: 10, y: 7 },
+        })
+        .setResolution(FONT.resolution)
+        .setOrigin(0.5)
+        .setAlpha(0)
+        .setInteractive({ useHandCursor: true });
+      this.tweens.add({ targets: btn, alpha: 1, duration: 350, delay: 150 + i * 120 });
+      hoverBtn(this, btn, PALETTE.text.golden);
+
+      const hint = this.addFading(x, height * 0.62, option.hint, { fontSize: '10px', color: '#8a8ab2' }, 200 + i * 120);
+      buttons.push(btn, hint);
+
+      btn.on('pointerdown', () => {
+        for (const el of buttons) el.destroy();
+        this.finishNight(this.resolveNight(option.action));
+      });
+    });
+  }
+
+  // --- Escolha da vítima (jogador Traidor) ---
+
+  private showVictimChoice(): void {
+    const { width, height } = this.scale;
+    const cx = width / 2;
+    const faithful = this.run.getAliveFaithfulNPCs();
+
+    if (faithful.length === 0) {
+      this.finishNight(this.resolveTraitorNight(this.run.aliveNPCs, [], this.run.getAliveTraitorNPCs()));
+      return;
+    }
+
+    const prompt = this.addFading(
+      cx,
+      height * 0.47,
+      'A mansão dorme. Escolha quem não verá o amanhecer:',
+      { fontSize: '15px', color: '#d8a8b8', fontStyle: 'italic' },
+      0,
+    );
+
+    const elements: Phaser.GameObjects.Text[] = [prompt];
+    const perRow = Math.min(faithful.length, 3);
+    faithful.forEach((npc, i) => {
+      const col = i % perRow;
+      const row = Math.floor(i / perRow);
+      const x = cx + (col - (perRow - 1) / 2) * width * 0.24;
+      const y = height * (0.56 + row * 0.075);
+      const suspicion = this.run.trustSystem.getSuspicion(npc.id);
+
+      const btn = this.add
+        .text(x, y, `[ ${npc.name.toUpperCase()} ]  susp. ${suspicion}`, {
+          fontFamily: FONT.family,
+          fontSize: '12px',
+          color: '#e8b0b0',
+          stroke: '#000000',
+          strokeThickness: 2,
+          backgroundColor: '#160a14',
+          padding: { x: 10, y: 6 },
+        })
+        .setResolution(FONT.resolution)
+        .setOrigin(0.5)
+        .setAlpha(0)
+        .setInteractive({ useHandCursor: true });
+      this.tweens.add({ targets: btn, alpha: 1, duration: 300, delay: 120 + i * 90 });
+      hoverBtn(this, btn, '#ff9a9a');
+      elements.push(btn);
+
+      btn.on('pointerdown', () => {
+        for (const el of elements) el.destroy();
+        this.finishNight(
+          this.resolveTraitorNight(this.run.aliveNPCs, [npc], this.run.getAliveTraitorNPCs()),
+        );
+      });
+    });
+  }
+
+  /** Texto com fade-in — atalho para os blocos noturnos. */
+  private addFading(
+    x: number,
+    y: number,
+    text: string,
+    style: Partial<Phaser.Types.GameObjects.Text.TextStyle>,
+    delay: number,
+  ): Phaser.GameObjects.Text {
+    const el = this.add
+      .text(x, y, text, {
         fontFamily: FONT.family,
-        fontSize: '15px',
-        color: '#6a6a92',
-        fontStyle: 'italic',
-      })
-      .setResolution(FONT.resolution)
-      .setOrigin(0.5)
-      .setAlpha(0);
-
-    this.tweens.add({ targets: nightLabel, alpha: 1, duration: 500, delay: 700 });
-
-    // Night elimination message
-    const nightMsg = this.add
-      .text(cx, height * 0.57, nightResult.message, {
-        fontFamily: FONT.family,
-        fontSize: '14px',
-        color: '#ff8888',
-        wordWrap: { width: width * 0.72 },
+        wordWrap: { width: this.scale.width * 0.8 },
         align: 'center',
+        ...style,
       })
       .setResolution(FONT.resolution)
       .setOrigin(0.5)
       .setAlpha(0);
+    this.tweens.add({ targets: el, alpha: 1, duration: 400, delay });
+    return el;
+  }
 
-    this.tweens.add({ targets: nightMsg, alpha: 1, duration: 500, delay: 950 });
+  // --- Desfecho da noite (comum aos dois papéis) ---
 
-    // Check defeat: player eliminated
+  private finishNight(nightResult: {
+    message: string;
+    playerEliminated: boolean;
+    newAlive: NPCData[];
+  }): void {
+    const { width, height } = this.scale;
+    const cx = width / 2;
+
+    audio.stinger('death');
+    this.addFading(cx, height * 0.47, '— A noite cai —', { fontSize: '15px', color: '#6a6a92', fontStyle: 'italic' }, 100);
+    this.addFading(cx, height * 0.57, nightResult.message, { fontSize: '14px', color: '#ff8888' }, 350);
+
     if (nightResult.playerEliminated) {
       this.time.delayedCall(3200, () => {
         fadeOutTo(this, 'GameOverScene', {
@@ -200,7 +337,6 @@ export class NightScene extends Phaser.Scene {
       return;
     }
 
-    // Check final day
     const nextDay = this.run.day + 1;
     if (nextDay > MAX_DAYS) {
       if (this.run.isPlayerTraitor()) {
@@ -223,20 +359,9 @@ export class NightScene extends Phaser.Scene {
       }
       return;
     }
-    // Next day preview
-    const nextStory = STORY_DAYS[nextDay - 1];
-    const nextTitle = this.add
-      .text(cx, height * 0.76, nextStory.title, {
-        fontFamily: FONT.family,
-        fontSize: '16px',
-        color: '#9999ff',
-        fontStyle: 'bold',
-      })
-      .setResolution(FONT.resolution)
-      .setOrigin(0.5)
-      .setAlpha(0);
 
-    this.tweens.add({ targets: nextTitle, alpha: 1, duration: 400, delay: 1300 });
+    const nextStory = STORY_DAYS[nextDay - 1];
+    this.addFading(cx, height * 0.76, nextStory.title, { fontSize: '16px', color: '#9999ff', fontStyle: 'bold' }, 1100);
 
     const continueBtn = this.add
       .text(cx, height * 0.87, '[ PRÓXIMO DIA → ]', {
@@ -253,7 +378,7 @@ export class NightScene extends Phaser.Scene {
       .setAlpha(0)
       .setInteractive({ useHandCursor: true });
 
-    this.tweens.add({ targets: continueBtn, alpha: 1, duration: 400, delay: 1600 });
+    this.tweens.add({ targets: continueBtn, alpha: 1, duration: 400, delay: 1400 });
     hoverBtn(this, continueBtn, PALETTE.text.golden);
 
     continueBtn.on('pointerdown', () => {
@@ -262,7 +387,7 @@ export class NightScene extends Phaser.Scene {
     });
   }
 
-  private resolveNight(): {
+  private resolveNight(action: NightAction): {
     message: string;
     playerEliminated: boolean;
     newAlive: NPCData[];
@@ -273,18 +398,16 @@ export class NightScene extends Phaser.Scene {
 
     this.run.lastNightVictim = null;
 
-    if (this.run.isPlayerTraitor()) {
-      return this.resolveTraitorNight(aliveNPCs, faithful, traitors);
-    }
-
     if (traitors.length === 0 || faithful.length === 0) {
       return { message: 'A noite passou em silêncio.', playerEliminated: false, newAlive: [...aliveNPCs] };
     }
 
     // Jogador exposto demais? Os Traidores podem vir atrás dele.
-    // Cada aliado Fiel vivo vigia o corredor e reduz o perigo.
+    // Porta trancada e aliados Fiéis vigiando reduzem o perigo;
+    // ficar de vigia no corredor expõe mais.
+    const actionThreatDelta = action === 'lock' ? -25 : action === 'watch' ? 8 : -5;
     const faithfulAllies = faithful.filter((n) => this.run.allies.has(n.id)).length;
-    const threat = Math.max(0, this.run.playerThreat - faithfulAllies * 10);
+    const threat = Math.max(0, this.run.playerThreat + actionThreatDelta - faithfulAllies * 10);
     if (Math.random() < Math.min(0.55, threat / 120)) {
       return {
         message: 'Passos param diante da sua porta. A maçaneta gira...',
@@ -308,9 +431,30 @@ export class NightScene extends Phaser.Scene {
       threat >= 18
         ? ' Durante a madrugada, alguém parou diante da sua porta — e seguiu adiante.'
         : '';
-    const msg =
+    let msg =
       `${target.name} foi eliminado(a) pelos Traidores durante a noite.` +
       ` Algo ficou para trás na cena...${escapedWarning}`;
+
+    // Vigiar os corredores: chance de flagrar o assassino em movimento
+    if (action === 'watch') {
+      const culprit = traitors[Math.floor(Math.random() * traitors.length)];
+      if (Math.random() < 0.55) {
+        this.run.trustSystem.increaseSuspicion(culprit.id, 14);
+        this.run.addPlayerThreat(10);
+        this.run.logEvent(
+          `Da fresta da porta, você viu ${culprit.name} deslizar pela escuridão na direção do quarto de ${target.name}.`,
+        );
+        msg =
+          `Da fresta da porta, você viu ${culprit.name} deslizar pela escuridão. ` +
+          `Ao amanhecer, ${target.name} não desceu para o café. Você sabe quem foi — mas será que acreditariam em você?`;
+      } else {
+        msg = `A vigília foi longa e fria. Nada. Ao amanhecer, ${target.name} não desceu para o café...`;
+      }
+    }
+
+    if (action === 'lock') {
+      msg += ' Sua porta trancada rangeu uma vez na madrugada — e depois, silêncio.';
+    }
 
     // Cena do crime: os Traidores deixam um rastro no cômodo da vítima
     this.run.lastNightVictim = target;

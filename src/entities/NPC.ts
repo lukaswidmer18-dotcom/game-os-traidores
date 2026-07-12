@@ -32,6 +32,13 @@ export class NPC {
   private walkEvent: Phaser.Time.TimerEvent | null = null;
   private walkStep = 0;
 
+  /** Sala onde o NPC está (atualizada ao viajar entre cômodos). */
+  roomId = '';
+
+  /** Trechos restantes de uma viagem entre salas (retomada se interrompida). */
+  private travelQueue: Array<{ x: number; y: number }> = [];
+  private travelDone: (() => void) | null = null;
+
   constructor(scene: Phaser.Scene, x: number, y: number, data: NPCData) {
     this.data = data;
     this.scene = scene;
@@ -99,6 +106,58 @@ export class NPC {
   startWander(bounds: WanderBounds): void {
     this.wanderBounds = bounds;
     this.scheduleNextWander();
+  }
+
+  /** NPC está no meio de uma viagem entre salas? */
+  get traveling(): boolean {
+    return this.travelQueue.length > 0;
+  }
+
+  /**
+   * Caminha por uma sequência de pontos (vãos de porta) até outra sala.
+   * Ao chegar, passa a passear dentro de newBounds. Se o jogador
+   * interromper no meio, a viagem continua de onde parou.
+   */
+  travelAlong(path: Array<{ x: number; y: number }>, newBounds: WanderBounds, onArrive?: () => void): void {
+    this.wanderTimer?.destroy();
+    this.wanderTimer = null;
+    this.wanderTween?.stop();
+    this.wanderTween = null;
+
+    this.wanderBounds = newBounds;
+    this.travelQueue = [...path];
+    this.travelDone = onArrive ?? null;
+    this.advanceTravel();
+  }
+
+  private advanceTravel(): void {
+    const next = this.travelQueue[0];
+    if (!next) {
+      this.stopWalkAnim();
+      this.syncParts();
+      const done = this.travelDone;
+      this.travelDone = null;
+      done?.();
+      this.scheduleNextWander();
+      return;
+    }
+
+    const dist = Phaser.Math.Distance.Between(this.sprite.x, this.sprite.y, next.x, next.y);
+    this.sprite.setFlipX(next.x < this.sprite.x);
+    this.startWalkAnim();
+
+    this.wanderTween = this.scene.tweens.add({
+      targets: this.sprite,
+      x: next.x,
+      y: next.y,
+      duration: Math.max(80, (dist / WANDER_SPEED) * 1000),
+      ease: 'Linear',
+      onUpdate: () => this.syncParts(),
+      onComplete: () => {
+        this.travelQueue = this.travelQueue.slice(1);
+        this.advanceTravel();
+      },
+    });
   }
 
   private scheduleNextWander(): void {
@@ -199,7 +258,12 @@ export class NPC {
   }
 
   private resumeWander(): void {
-    if (!this.wanderBounds || this.wanderTimer || this.wanderTween?.isPlaying()) return;
+    if (this.wanderTimer || this.wanderTween?.isPlaying()) return;
+    if (this.traveling) {
+      this.advanceTravel(); // retoma a viagem interrompida pela conversa
+      return;
+    }
+    if (!this.wanderBounds) return;
     this.scheduleNextWander();
   }
 

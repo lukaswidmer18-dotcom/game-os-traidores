@@ -10,7 +10,24 @@ import {
   SHEET_KEYS,
   WALL_FRAME,
 } from '../assets/tileArt';
-import { CLUE_POSITIONS, DOOR_SIZE, PLAYER_SPAWN, ROOMS, WALL_THICKNESS, WORLD_HEIGHT, WORLD_WIDTH, getNPCSpawnPosition } from '../data/world';
+import {
+  CLUE_POSITIONS,
+  DOOR_SIZE,
+  GATED_DOORS,
+  GatedDoor,
+  KEY_ITEMS,
+  PLAYER_SPAWN,
+  ROOMS,
+  RoomEdge,
+  SECRET_LEVERS,
+  SecretLever,
+  WALL_THICKNESS,
+  WORLD_HEIGHT,
+  WORLD_WIDTH,
+  buildRoomGraph,
+  getGatedDoorCenter,
+  getNPCSpawnPosition,
+} from '../data/world';
 import { STORY_DAYS } from '../data/storyDays';
 import { generateSpontaneousEvent } from '../data/spontaneousEvents';
 import { Player } from '../entities/Player';
@@ -20,6 +37,7 @@ import { DialogueSystem } from '../systems/DialogueSystem';
 import { InterrogationSystem, QuestionId, InterrogationOutcome } from '../systems/InterrogationSystem';
 import { CutscenePlayer, CutsceneStep } from '../systems/CutscenePlayer';
 import { ACTIONS_PER_DAY, getRun, RunState } from '../systems/RunState';
+import { audio } from '../systems/AudioSystem';
 import { HUD } from '../ui/HUD';
 import { DialogueBox } from '../ui/DialogueBox';
 import { Journal } from '../ui/Journal';
@@ -33,6 +51,8 @@ export class ExplorationScene extends Phaser.Scene {
   private npcs: NPC[] = [];
   private walls!: Phaser.Physics.Arcade.StaticGroup;
   private clueMarkers = new Map<string, Phaser.GameObjects.Image>();
+  private keyMarkers = new Map<string, Phaser.GameObjects.Image>();
+  private doorBlockers = new Map<string, Phaser.GameObjects.GameObject[]>();
 
   private dialogueSystem!: DialogueSystem;
   private interrogationSystem!: InterrogationSystem;
@@ -49,6 +69,9 @@ export class ExplorationScene extends Phaser.Scene {
 
   private activeNPC: NPC | null = null;
   private nearClue: string | null = null;
+  private nearKey: string | null = null;
+  private nearDoor: GatedDoor | null = null;
+  private nearLever: SecretLever | null = null;
   private inputCooldown = 0;
 
   private spokenTo = new Set<string>();
@@ -58,6 +81,9 @@ export class ExplorationScene extends Phaser.Scene {
   private councilButton: Phaser.GameObjects.Text | null = null;
   private eventsFired = 0;
   private eventTimer: Phaser.Time.TimerEvent | null = null;
+  private roomGraph = buildRoomGraph();
+  private routineTimer: Phaser.Time.TimerEvent | null = null;
+  private chatTimer: Phaser.Time.TimerEvent | null = null;
   private uiCamera!: Phaser.Cameras.Scene2D.Camera;
   private cutscene!: CutscenePlayer;
 
@@ -79,9 +105,11 @@ export class ExplorationScene extends Phaser.Scene {
     this.interrogationSystem = new InterrogationSystem(this.dialogueSystem);
 
     this.buildMap();
+    this.setupGatedDoors();
     this.spawnPlayer();
     this.spawnNPCs();
     this.spawnClueMarkers();
+    this.spawnKeyItems();
 
     // Tudo criado até aqui é mundo; o que vem depois é UI de tela.
     const worldObjects = [...this.children.list];
@@ -104,6 +132,7 @@ export class ExplorationScene extends Phaser.Scene {
     const beginDay = () => {
       cam.setZoom(2);
       cam.startFollow(this.player.sprite, true, 0.12, 0.12);
+      audio.startAmbient('day');
       this.showDayBanner();
       this.showDayIntro();
       this.scheduleSpontaneousEvent();
@@ -254,8 +283,13 @@ export class ExplorationScene extends Phaser.Scene {
   private resetDayState(): void {
     this.npcs = [];
     this.clueMarkers.clear();
+    this.keyMarkers.clear();
+    this.doorBlockers.clear();
     this.activeNPC = null;
     this.nearClue = null;
+    this.nearKey = null;
+    this.nearDoor = null;
+    this.nearLever = null;
     this.inputCooldown = 0;
     this.spokenTo.clear();
     this.askedQuestions.clear();
@@ -265,6 +299,10 @@ export class ExplorationScene extends Phaser.Scene {
     this.eventsFired = 0;
     this.eventTimer?.destroy();
     this.eventTimer = null;
+    this.routineTimer?.destroy();
+    this.routineTimer = null;
+    this.chatTimer?.destroy();
+    this.chatTimer = null;
   }
 
   // --- Eventos espontâneos ---
@@ -285,6 +323,7 @@ export class ExplorationScene extends Phaser.Scene {
     for (const { npcId, delta } of event.suspicionDeltas) {
       this.run.trustSystem.increaseSuspicion(npcId, delta);
     }
+    audio.blip();
     this.run.logEvent(event.text);
     this.showEventToast(event.text);
   }
@@ -446,16 +485,144 @@ export class ExplorationScene extends Phaser.Scene {
   private addDoorGlow(room: (typeof ROOMS)[number]): void {
     for (const doorway of room.doorways) {
       const size = doorway.size ?? DOOR_SIZE;
+      let x: number;
+      let y: number;
       if (doorway.side === 'left' || doorway.side === 'right') {
-        const x = doorway.side === 'left' ? room.x : room.x + room.w;
-        const y = room.y + doorway.offset;
+        x = doorway.side === 'left' ? room.x : room.x + room.w;
+        y = room.y + doorway.offset;
+      } else {
+        x = room.x + doorway.offset;
+        y = doorway.side === 'top' ? room.y : room.y + room.h;
+      }
+
+      // Porta fechada (trancada/secreta) não ganha brilho — não denuncia o vão
+      if (this.findClosedGatedDoorAt(x, y)) continue;
+
+      if (doorway.side === 'left' || doorway.side === 'right') {
         this.add.rectangle(x, y, 8, size - 6, room.glowColor, 0.18).setDepth(-7);
       } else {
-        const x = room.x + doorway.offset;
-        const y = doorway.side === 'top' ? room.y : room.y + room.h;
         this.add.rectangle(x, y, size - 6, 8, room.glowColor, 0.18).setDepth(-7);
       }
     }
+  }
+
+  /** Porta condicionada ainda fechada cujo vão fica neste ponto global. */
+  private findClosedGatedDoorAt(x: number, y: number): GatedDoor | null {
+    for (const door of GATED_DOORS) {
+      if (this.run.openedDoors.has(door.id)) continue;
+      const center = getGatedDoorCenter(door);
+      if (Math.abs(center.x - x) < 2 && Math.abs(center.y - y) < 2) return door;
+    }
+    return null;
+  }
+
+  /**
+   * Bloqueios físicos sobre os vãos de portas trancadas/secretas.
+   * Porta trancada aparece como porta de madeira com cadeado; porta
+   * secreta se disfarça de parede comum até ser revelada.
+   */
+  private setupGatedDoors(): void {
+    for (const door of GATED_DOORS) {
+      if (this.run.openedDoors.has(door.id)) continue;
+
+      const center = getGatedDoorCenter(door);
+      const horizontal = door.side === 'top' || door.side === 'bottom';
+      const w = horizontal ? DOOR_SIZE : WALL_THICKNESS;
+      const h = horizontal ? WALL_THICKNESS : DOOR_SIZE;
+
+      const blocker = this.add
+        .tileSprite(center.x, center.y, w, h, SHEET_KEYS.base, WALL_FRAME)
+        .setDepth(-7);
+      if (door.kind === 'locked') {
+        blocker.setTint(0x9a6a3a); // madeira, destoa da parede: convite a examinar
+      }
+      this.physics.add.existing(blocker, true);
+      this.walls.add(blocker);
+
+      const visuals: Phaser.GameObjects.GameObject[] = [blocker];
+      if (door.kind === 'locked') {
+        const lock = this.add.rectangle(center.x, center.y, 6, 7, 0xd8a838, 0.95).setDepth(-6);
+        const hole = this.add.rectangle(center.x, center.y + 1, 2, 3, 0x1a1408, 1).setDepth(-6);
+        visuals.push(lock, hole);
+      }
+      this.doorBlockers.set(door.id, visuals);
+    }
+
+    // Estante deslocada: mecanismo visível que revela a porta secreta
+    for (const lever of SECRET_LEVERS) {
+      this.placeBase(lever.x, lever.y, base(44, 12), -6);
+      this.placeBase(lever.x + 16, lever.y, base(46, 12), -6);
+    }
+  }
+
+  private openGatedDoor(door: GatedDoor): void {
+    this.run.openedDoors.add(door.id);
+    const visuals = this.doorBlockers.get(door.id) ?? [];
+    for (const visual of visuals) {
+      if (visual instanceof Phaser.GameObjects.TileSprite) {
+        this.walls.remove(visual, true, true);
+      } else {
+        visual.destroy();
+      }
+    }
+    this.doorBlockers.delete(door.id);
+
+    const center = getGatedDoorCenter(door);
+    this.claimWorld(burst(this, center.x, center.y, SPECTACLE.burstCount, 0xd8b868));
+    this.cameras.main.shake(180, 0.0035);
+    audio.creak();
+    audio.stinger('discovery');
+    this.run.logEvent(door.openText);
+    this.dialogueBox.show('Descoberta', door.openText);
+    this.inputCooldown = 220;
+  }
+
+  private spawnKeyItems(): void {
+    for (const item of KEY_ITEMS) {
+      if (this.run.items.has(item.id)) continue;
+
+      const marker = this.add.image(item.x, item.y, TEXTURE_KEYS.key).setDepth(2);
+      this.tweens.add({
+        targets: marker,
+        y: item.y - 4,
+        duration: 700,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+
+      const glowRing = this.add.circle(item.x, item.y, SIZES.clueMarker + 6, 0xd8a838, 0.1).setDepth(1);
+      this.tweens.add({
+        targets: glowRing,
+        alpha: 0.24,
+        scale: 1.25,
+        duration: 650,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+
+      marker.setData('glowRing', glowRing);
+      this.keyMarkers.set(item.id, marker);
+    }
+  }
+
+  private collectKey(itemId: string): void {
+    const item = KEY_ITEMS.find((candidate) => candidate.id === itemId);
+    const marker = this.keyMarkers.get(itemId);
+    if (!item || !marker) return;
+
+    this.run.items.add(item.id);
+    audio.chime(true);
+    this.claimWorld(burst(this, marker.x, marker.y, SPECTACLE.burstCount, 0xd8a838));
+    (marker.getData('glowRing') as Phaser.GameObjects.Arc | undefined)?.destroy();
+    marker.destroy();
+    this.keyMarkers.delete(itemId);
+
+    this.run.logEvent(`Você encontrou: ${item.name}.`);
+    this.dialogueBox.show(item.name, item.description);
+    this.nearKey = null;
+    this.inputCooldown = 200;
   }
 
   /** Um tile do sheet de interiores como decoração (sem colisão). */
@@ -673,6 +840,74 @@ export class ExplorationScene extends Phaser.Scene {
         this.placeBase(x + w - 20, y + 12, base(46, 3));
         break;
       }
+
+      case 'chapel': {
+        // Altar ao norte com estandartes e velas sempre acesas
+        this.placeBase(cx, y + 14, base(50, 0)); // estandarte
+        this.placeBase(cx - 28, y + 14, base(49, 1));
+        this.placeBase(cx + 28, y + 14, base(51, 1));
+        this.placeIndoor(cx - 16, y + 40, indoor(16, 7), -5); // candelabros do altar
+        this.placeIndoor(cx + 16, y + 40, indoor(18, 7), -5);
+        candleFlicker(this, cx - 16, y + 36);
+        candleFlicker(this, cx + 16, y + 36);
+        // Bancos de oração em duas fileiras
+        for (let row = 0; row < 3; row++) {
+          this.placeIndoor(cx - 24, y + 90 + row * 34, indoor(4, 7));
+          this.placeIndoor(cx + 24, y + 90 + row * 34, indoor(7, 7));
+        }
+        this.placeBase(cx, y + 64, base(50, 15), -5); // missal aberto
+        this.placeIndoor(x + 18, y + h - 24, indoor(16, 0)); // planta
+        break;
+      }
+
+      case 'master': {
+        // Cama de casal do anfitrião + escrivaninha com o livro-razão
+        this.placeIndoor(cx - 8, y + 28, indoor(12, 3));
+        this.placeIndoor(cx + 8, y + 28, indoor(13, 3));
+        this.placeBase(x + 24, y + 14, base(29, 3)); // espelho oval
+        this.placeBase(x + w - 26, y + 14, base(26, 8)); // relógio
+        this.placeIndoor(cx - 8, cy + 24, indoor(1, 0)); // escrivaninha
+        this.placeIndoor(cx + 8, cy + 24, indoor(2, 0));
+        this.placeIndoor(cx - 26, cy + 24, indoor(0, 2)); // cadeira
+        this.placeBase(cx - 8, cy + 22, base(50, 15), -5); // livro-razão aberto
+        this.placeIndoor(cx + 8, cy + 20, indoor(16, 6), -5); // vela
+        candleFlicker(this, cx + 8, cy + 16);
+        this.placeIndoor(x + 20, y + h - 26, indoor(17, 0)); // planta
+        break;
+      }
+
+      case 'basement': {
+        // Caixotes, barris e teias — depósito esquecido da mansão
+        this.placeBase(x + 26, y + 20, base(26, 0));
+        this.placeBase(x + 44, y + 20, base(27, 0));
+        this.placeBase(x + 26, y + 40, base(27, 0));
+        this.placeBase(x + w - 30, y + 22, base(44, 13)); // prateleira empoeirada
+        this.placeBase(x + w - 46, y + 22, base(45, 13));
+        this.placeBase(x + 30, y + h - 28, base(51, 15)); // sacos
+        this.placeBase(x + 48, y + h - 26, base(52, 15));
+        this.placeBase(x + w - 32, y + h - 30, base(26, 0));
+        this.placeIndoor(cx, cy - 10, indoor(16, 6), -5); // vela solitária
+        candleFlicker(this, cx, cy - 14);
+        break;
+      }
+
+      case 'crypt': {
+        // Túmulos da família Velhart em duas fileiras solenes
+        const tombFrames = [base(52, 11), base(51, 10), base(53, 9), base(51, 11)];
+        tombFrames.forEach((frame, i) => {
+          this.placeBase(x + 52 + i * 48, y + 46, frame);
+          this.placeBase(x + 52 + i * 48, y + h - 44, tombFrames[(i + 2) % tombFrames.length]);
+        });
+        // Túmulo central de pedra com o pacto sobre ele
+        this.placeBase(cx, cy, base(52, 10));
+        this.placeIndoor(cx - 20, cy - 4, indoor(16, 7), -5); // candelabros votivos
+        this.placeIndoor(cx + 20, cy - 4, indoor(18, 7), -5);
+        candleFlicker(this, cx - 20, cy - 8);
+        candleFlicker(this, cx + 20, cy - 8);
+        this.placeIndoor(x + 24, y + 14, indoor(20, 6), -7); // tochas apagadas
+        this.placeIndoor(x + w - 24, y + 14, indoor(21, 6), -7);
+        break;
+      }
     }
   }
 
@@ -724,6 +959,7 @@ export class ExplorationScene extends Phaser.Scene {
     for (const npcData of this.run.aliveNPCs) {
       const pos = getNPCSpawnPosition(npcData);
       const npc = new NPC(this, pos.x, pos.y, npcData);
+      npc.roomId = npcData.startRoom;
 
       const room = ROOMS.find((r) => r.id === npcData.startRoom);
       if (room) {
@@ -732,6 +968,123 @@ export class ExplorationScene extends Phaser.Scene {
 
       this.npcs.push(npc);
     }
+
+    this.scheduleNPCRoutines();
+    this.scheduleNPCChats();
+  }
+
+  // --- Rotinas dos NPCs: a mansão se movimenta ---
+
+  /** De tempos em tempos, um NPC decide trocar de sala andando pelas portas. */
+  private scheduleNPCRoutines(): void {
+    this.routineTimer = this.time.addEvent({
+      delay: 9000,
+      loop: true,
+      callback: () => {
+        const candidates = this.npcs.filter(
+          (npc) => !npc.traveling && npc.roomId && !this.isNearPlayerNPC(npc),
+        );
+        if (candidates.length === 0) return;
+        const npc = candidates[Math.floor(Math.random() * candidates.length)];
+        if (Math.random() < 0.45) this.sendNPCToNeighborRoom(npc);
+      },
+    });
+  }
+
+  private isNearPlayerNPC(npc: NPC): boolean {
+    const dx = npc.x - this.player.x;
+    const dy = npc.y - this.player.y;
+    return Math.sqrt(dx * dx + dy * dy) < 60;
+  }
+
+  private sendNPCToNeighborRoom(npc: NPC): void {
+    const edges: RoomEdge[] = this.roomGraph.get(npc.roomId) ?? [];
+    if (edges.length === 0) return;
+
+    const edge = edges[Math.floor(Math.random() * edges.length)];
+    const dest = ROOMS.find((room) => room.id === edge.to);
+    if (!dest) return;
+
+    const margin = 30;
+    const target = {
+      x: dest.x + margin + Math.random() * (dest.w - margin * 2),
+      y: dest.y + margin + Math.random() * (dest.h - margin * 2),
+    };
+
+    npc.roomId = dest.id;
+    npc.travelAlong(
+      [edge.via, target],
+      { x: dest.x, y: dest.y, w: dest.w, h: dest.h },
+    );
+  }
+
+  /** NPCs que dividem uma sala trocam sussurros — e você pode flagrar. */
+  private scheduleNPCChats(): void {
+    this.chatTimer = this.time.addEvent({
+      delay: 21000,
+      loop: true,
+      callback: () => this.fireNPCChat(),
+    });
+  }
+
+  private fireNPCChat(): void {
+    const byRoom = new Map<string, NPC[]>();
+    for (const npc of this.npcs) {
+      if (npc.traveling) continue;
+      byRoom.set(npc.roomId, [...(byRoom.get(npc.roomId) ?? []), npc]);
+    }
+
+    const crowded = [...byRoom.entries()].filter(([, group]) => group.length >= 2);
+    if (crowded.length === 0) return;
+
+    const [roomId, group] = crowded[Math.floor(Math.random() * crowded.length)];
+    const [a, b] = group.sort(() => Math.random() - 0.5);
+    const room = ROOMS.find((r) => r.id === roomId);
+
+    this.showChatBubble(a);
+    this.showChatBubble(b);
+
+    // Metade das conversas vira burburinho público — informação difusa
+    if (Math.random() < 0.5 && room) {
+      const bothTraitors = a.data.role === 'traitor' && b.data.role === 'traitor';
+      const delta = bothTraitors ? 4 : 2;
+      this.run.trustSystem.increaseSuspicion(a.data.id, delta);
+      this.run.trustSystem.increaseSuspicion(b.data.id, delta);
+      const text = bothTraitors
+        ? `${a.data.name} e ${b.data.name} sussurravam em ${room.label} — e mudaram de assunto quando notaram você.`
+        : `${a.data.name} e ${b.data.name} conversavam em voz baixa em ${room.label}.`;
+      this.run.logEvent(text);
+      this.showEventToast(text);
+    }
+  }
+
+  /** Balão "…" curto acima do NPC — sinal visual de conversa. */
+  private showChatBubble(npc: NPC): void {
+    const bubble = this.add
+      .text(npc.x, npc.y - 26, '...', {
+        fontFamily: FONT.family,
+        fontSize: '12px',
+        color: '#f0e8d0',
+        backgroundColor: '#1a1428',
+        padding: { x: 5, y: 2 },
+      })
+      .setResolution(FONT.resolution)
+      .setOrigin(0.5, 1)
+      .setDepth(9)
+      .setAlpha(0);
+    this.claimWorld(bubble);
+
+    this.tweens.add({
+      targets: bubble,
+      alpha: 0.95,
+      y: bubble.y - 4,
+      duration: 250,
+      onComplete: () => {
+        this.time.delayedCall(2400, () => {
+          this.tweens.add({ targets: bubble, alpha: 0, duration: 300, onComplete: () => bubble.destroy() });
+        });
+      },
+    });
   }
 
   private spawnClueMarkers(): void {
@@ -839,7 +1192,8 @@ export class ExplorationScene extends Phaser.Scene {
       {
         ask: (npc, questionId) => this.handleAsk(npc, questionId),
         isAsked: (npcId, questionId) =>
-          (questionId === 'alliance' && this.run.allies.has(npcId)) ||
+          (questionId === 'alliance' &&
+            (this.run.allies.has(npcId) || this.isTraitorPartnerById(npcId))) ||
           this.askedQuestions.has(this.questionKey(npcId, questionId)),
         reading: (npcId) => this.describeReading(npcId),
         onClose: () => this.checkCouncilUnlock(),
@@ -858,6 +1212,11 @@ export class ExplorationScene extends Phaser.Scene {
     this.clueKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.C);
     this.journalKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.J);
     this.escKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+
+    this.input.keyboard!.on('keydown-M', () => {
+      const muted = audio.toggleMuted();
+      this.showEventToast(muted ? 'Som desligado (M para religar)' : 'Som ligado');
+    });
   }
 
   private showDayIntro(): void {
@@ -954,6 +1313,10 @@ export class ExplorationScene extends Phaser.Scene {
     }
 
     this.player.update(delta);
+    const velocity = this.player.body.velocity;
+    if (velocity.x !== 0 || velocity.y !== 0) {
+      audio.footstep();
+    }
     this.checkProximity();
   }
 
@@ -989,16 +1352,77 @@ export class ExplorationScene extends Phaser.Scene {
     }
     this.nearClue = nearClueId;
 
+    let nearKeyId: string | null = null;
+    for (const [id, marker] of this.keyMarkers.entries()) {
+      const dx = marker.x - this.player.x;
+      const dy = marker.y - this.player.y;
+      if (Math.sqrt(dx * dx + dy * dy) < 28) {
+        nearKeyId = id;
+        break;
+      }
+    }
+    this.nearKey = nearKeyId;
+
+    this.nearDoor = null;
+    for (const door of GATED_DOORS) {
+      if (this.run.openedDoors.has(door.id) || door.kind !== 'locked') continue;
+      const center = getGatedDoorCenter(door);
+      const dx = center.x - this.player.x;
+      const dy = center.y - this.player.y;
+      if (Math.sqrt(dx * dx + dy * dy) < 44) {
+        this.nearDoor = door;
+        break;
+      }
+    }
+
+    this.nearLever = null;
+    for (const lever of SECRET_LEVERS) {
+      if (this.run.openedDoors.has(lever.doorId)) continue;
+      const dx = lever.x - this.player.x;
+      const dy = lever.y - this.player.y;
+      if (Math.sqrt(dx * dx + dy * dy) < 36) {
+        this.nearLever = lever;
+        break;
+      }
+    }
+
     if (nearNPC) {
       this.hud.setInteractHint(`[E] interrogar ${nearNPC.data.name}`);
     } else if (nearClueId) {
       this.hud.setInteractHint('[E] examinar pista');
+    } else if (nearKeyId) {
+      this.hud.setInteractHint('[E] pegar item');
+    } else if (this.nearDoor) {
+      this.hud.setInteractHint(
+        this.run.items.has(this.nearDoor.keyId ?? '')
+          ? this.nearDoor.unlockHint
+          : '[E] porta trancada',
+      );
+    } else if (this.nearLever) {
+      const door = GATED_DOORS.find((d) => d.id === this.nearLever!.doorId);
+      this.hud.setInteractHint(door?.unlockHint ?? '[E] examinar');
     } else {
       this.hud.setInteractHint('');
     }
   }
 
   private tryInteract(): void {
+    // Itens e portas não gastam ação do dia — exploração continua livre
+    if (!this.activeNPC && !this.nearClue) {
+      if (this.nearKey) {
+        this.collectKey(this.nearKey);
+        return;
+      }
+      if (this.nearDoor) {
+        this.tryUnlockDoor(this.nearDoor);
+        return;
+      }
+      if (this.nearLever) {
+        this.examineLever(this.nearLever);
+        return;
+      }
+    }
+
     if (this.actionsExhausted() && (this.nearClue || this.activeNPC)) {
       this.dialogueBox.show(
         'Narrador',
@@ -1018,6 +1442,22 @@ export class ExplorationScene extends Phaser.Scene {
     }
   }
 
+  private tryUnlockDoor(door: GatedDoor): void {
+    if (door.keyId && this.run.items.has(door.keyId)) {
+      this.openGatedDoor(door);
+      return;
+    }
+    this.dialogueBox.show('Porta trancada', door.lockedHint);
+    this.inputCooldown = 200;
+  }
+
+  private examineLever(lever: SecretLever): void {
+    const door = GATED_DOORS.find((candidate) => candidate.id === lever.doorId);
+    if (!door) return;
+    this.openGatedDoor(door);
+    this.nearLever = null;
+  }
+
   private actionsExhausted(): boolean {
     return this.actionsTaken >= ACTIONS_PER_DAY;
   }
@@ -1027,6 +1467,7 @@ export class ExplorationScene extends Phaser.Scene {
     if (!clue) return;
 
     this.removeClueMarker(clueId, true);
+    audio.chime();
     this.actionsTaken++;
     this.hud.setClueCount(this.run.clueSystem.getCollected().length);
     this.hud.setActions(this.actionsTaken, ACTIONS_PER_DAY);
@@ -1065,6 +1506,10 @@ export class ExplorationScene extends Phaser.Scene {
       return this.handleAlliance(npc);
     }
 
+    if (this.isTraitorPartner(npc)) {
+      return this.handleTraitorPartnerAsk(npc, questionId);
+    }
+
     const outcome = this.interrogationSystem.ask(
       questionId,
       npc,
@@ -1099,6 +1544,57 @@ export class ExplorationScene extends Phaser.Scene {
     return response;
   }
 
+  private handleTraitorPartnerAsk(
+    npc: NPCData,
+    questionId: Exclude<QuestionId, 'alliance'>,
+  ): string {
+    const target = this.pickFaithfulSabotageTarget();
+    let response: string;
+
+    switch (questionId) {
+      case 'alibi':
+        this.run.reducePlayerThreat(3);
+        response =
+          `"Baixo. A historia entre nos precisa bater." ${npc.name} ajusta o tom: ` +
+          '"Se perguntarem, voce estava longe da cena. Eu confirmo. Voce confirma o meu caminho."';
+        break;
+      case 'pressure':
+        if (target) this.run.trustSystem.increaseSuspicion(target.id, 7);
+        response = target
+          ? `"Pressao publica, entendi." ${npc.name} olha para ${target.name}. "No Conselho, eu faco essa pessoa parecer nervosa."`
+          : `"Nao ha mais ninguem para empurrar." ${npc.name} mantem a voz baixa.`;
+        break;
+      case 'rumor':
+        if (target) this.run.trustSystem.increaseSuspicion(target.id, 10);
+        response = target
+          ? `"Vamos espalhar um nome: ${target.name}." ${npc.name} sorri sem mostrar os dentes. "Um sussurro certo vale mais que uma prova."`
+          : `"A casa ja esta vazia demais para boatos." ${npc.name} observa a porta.`;
+        break;
+      case 'evidence': {
+        const exposed = this.run.clueSystem
+          .getCollected()
+          .some((clue) => clue.contradictsNPC === npc.id || clue.revealsRole === npc.id);
+        if (target) this.run.trustSystem.increaseSuspicion(target.id, exposed ? 8 : 5);
+        response = exposed
+          ? `"Essa pista aponta para mim." ${npc.name} prende a respiracao. "Entao vamos sujar a leitura dela e ligar o rastro a ${target?.name ?? 'um Fiel'} antes do Conselho."`
+          : `"Sem prova contra mim, melhor fabricar duvida." ${npc.name} aponta discretamente para ${target?.name ?? 'a mesa do Conselho'}.`;
+        break;
+      }
+    }
+
+    this.askedQuestions.add(this.questionKey(npc.id, questionId));
+    this.spokenTo.add(npc.id);
+    this.actionsTaken++;
+    this.hud.setClueCount(this.run.clueSystem.getCollected().length);
+    this.updateThreatHud();
+    this.hud.setActions(this.actionsTaken, ACTIONS_PER_DAY);
+    this.checkCouncilUnlock();
+
+    if (this.actionsExhausted()) {
+      response += '\n\nO sol se poe. Nao ha tempo para mais nada -- o Conselho aguarda.';
+    }
+    return response;
+  }
   private handleAlliance(npc: NPCData): string {
     if (this.run.isPlayerTraitor() && npc.role === 'traitor') {
       this.run.allies.add(npc.id);
@@ -1165,11 +1661,33 @@ export class ExplorationScene extends Phaser.Scene {
     }
   }
 
+  private isTraitorPartner(npc: NPCData): boolean {
+    return this.run.isPlayerTraitor() && npc.role === 'traitor';
+  }
+
+  private isTraitorPartnerById(npcId: string): boolean {
+    const npc = this.run.aliveNPCs.find((candidate) => candidate.id === npcId);
+    return !!npc && this.isTraitorPartner(npc);
+  }
+
+  private pickFaithfulSabotageTarget(): NPCData | null {
+    const faithful = this.run.getAliveFaithfulNPCs();
+    if (faithful.length === 0) return null;
+    return faithful.reduce((best, candidate) =>
+      this.run.trustSystem.getSuspicion(candidate.id) > this.run.trustSystem.getSuspicion(best.id)
+        ? candidate
+        : best,
+    );
+  }
   private questionKey(npcId: string, questionId: QuestionId): string {
     return `${this.run.day}:${npcId}:${questionId}`;
   }
 
   private describeReading(npcId: string): string {
+    if (this.isTraitorPartnerById(npcId)) {
+      return 'parceiro(a) secreto(a)  |  cumplice do seu lado';
+    }
+
     const trust = this.run.trustSystem.getTrust(npcId);
     const suspicion = this.run.trustSystem.getSuspicion(npcId);
 

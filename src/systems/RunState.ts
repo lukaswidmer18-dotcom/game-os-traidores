@@ -32,6 +32,12 @@ export class RunState {
    */
   readonly allies = new Set<string>();
 
+  /** Itens-chave coletados (chaves, objetos de missão). Persistem entre os dias. */
+  readonly items = new Set<string>();
+
+  /** Portas condicionadas já abertas (trancadas ou secretas). Persistem entre os dias. */
+  readonly openedDoors = new Set<string>();
+
   /** Diário de acontecimentos (eventos espontâneos, mortes) por dia. */
   readonly eventLog: Array<{ day: number; text: string }> = [];
 

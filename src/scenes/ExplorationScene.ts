@@ -10,7 +10,7 @@ import {
   SHEET_KEYS,
   WALL_FRAME,
 } from '../assets/tileArt';
-import { CLUE_POSITIONS, DOOR_SIZE, ROOMS, WALL_THICKNESS, WORLD_HEIGHT, WORLD_WIDTH, getNPCSpawnPosition } from '../data/world';
+import { CLUE_POSITIONS, DOOR_SIZE, PLAYER_SPAWN, ROOMS, WALL_THICKNESS, WORLD_HEIGHT, WORLD_WIDTH, getNPCSpawnPosition } from '../data/world';
 import { STORY_DAYS } from '../data/storyDays';
 import { generateSpontaneousEvent } from '../data/spontaneousEvents';
 import { Player } from '../entities/Player';
@@ -18,6 +18,7 @@ import { NPC } from '../entities/NPC';
 import { NPCData } from '../data/npcs';
 import { DialogueSystem } from '../systems/DialogueSystem';
 import { InterrogationSystem, QuestionId, InterrogationOutcome } from '../systems/InterrogationSystem';
+import { CutscenePlayer, CutsceneStep } from '../systems/CutscenePlayer';
 import { ACTIONS_PER_DAY, getRun, RunState } from '../systems/RunState';
 import { HUD } from '../ui/HUD';
 import { DialogueBox } from '../ui/DialogueBox';
@@ -57,6 +58,8 @@ export class ExplorationScene extends Phaser.Scene {
   private councilButton: Phaser.GameObjects.Text | null = null;
   private eventsFired = 0;
   private eventTimer: Phaser.Time.TimerEvent | null = null;
+  private uiCamera!: Phaser.Cameras.Scene2D.Camera;
+  private cutscene!: CutscenePlayer;
 
   constructor() {
     super({ key: 'GameScene' });
@@ -79,26 +82,132 @@ export class ExplorationScene extends Phaser.Scene {
     this.spawnPlayer();
     this.spawnNPCs();
     this.spawnClueMarkers();
+
+    // Tudo criado até aqui é mundo; o que vem depois é UI de tela.
+    const worldObjects = [...this.children.list];
+
     this.setupUI();
     this.setupInput();
     this.addVignette();
-    this.showDayBanner();
-    this.showDayIntro();
-    this.scheduleSpontaneousEvent();
+    this.setupCameras(worldObjects);
+
+    this.cutscene = new CutscenePlayer(this, (objs) => this.claimUI(objs));
+    this.startDayCinematic();
   }
 
-  /** Escurecimento suave das bordas — foco no centro da mansão. */
+  /**
+   * Abertura cinematográfica: dia 1 apresenta a mansão; dias seguintes
+   * mostram onde o corpo foi encontrado. Banner e narração vêm depois.
+   */
+  private startDayCinematic(): void {
+    const cam = this.cameras.main;
+    const beginDay = () => {
+      cam.setZoom(2);
+      cam.startFollow(this.player.sprite, true, 0.12, 0.12);
+      this.showDayBanner();
+      this.showDayIntro();
+      this.scheduleSpontaneousEvent();
+    };
+
+    if (this.run.day === 1) {
+      cam.stopFollow();
+      cam.setZoom(1.3);
+      cam.centerOn(656, 224);
+      const steps: CutsceneStep[] = [
+        {
+          caption: 'A Mansão Velhart guarda um segredo.',
+          panTo: { x: 368, y: 260, duration: 1700 },
+          hold: 650,
+        },
+        {
+          caption: 'Oito hóspedes. Dois deles mentem.',
+          panTo: { x: 928, y: 480, duration: 1900 },
+          hold: 650,
+        },
+        {
+          caption: 'Esta noite, alguém não vai dormir.',
+          panTo: { x: 656, y: 720, duration: 1600 },
+          hold: 650,
+        },
+        {
+          caption: '',
+          panTo: { x: this.player.x, y: this.player.y, duration: 1400 },
+          zoomTo: { zoom: 2, duration: 1400 },
+          hold: 200,
+        },
+      ];
+      this.cutscene.play(steps, beginDay);
+      return;
+    }
+
+    const victim = this.run.lastNightVictim;
+    const room = victim ? ROOMS.find((r) => r.id === victim.startRoom) : undefined;
+    if (victim && room) {
+      cam.stopFollow();
+      const crimeX = room.x + room.w / 2;
+      const crimeY = room.y + room.h * 0.68;
+      const steps: CutsceneStep[] = [
+        { caption: 'Ao amanhecer, um grito ecoa pela mansão...', hold: 900 },
+        {
+          caption: `O corpo de ${victim.name} foi encontrado — ${room.label}.`,
+          panTo: { x: crimeX, y: crimeY, duration: 1700 },
+          hold: 1500,
+        },
+        {
+          caption: '',
+          panTo: { x: this.player.x, y: this.player.y, duration: 1300 },
+          hold: 150,
+        },
+      ];
+      this.cutscene.play(steps, beginDay);
+      return;
+    }
+
+    beginDay();
+  }
+
+  /**
+   * Duas câmeras: a principal segue o jogador com zoom 2x (só mundo);
+   * a de UI fica parada em zoom 1 (só interface). Objetos criados depois
+   * do create() entram via claimUI/claimWorld.
+   */
+  private setupCameras(worldObjects: Phaser.GameObjects.GameObject[]): void {
+    const cam = this.cameras.main;
+    cam.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    cam.setZoom(2);
+    cam.startFollow(this.player.sprite, true, 0.12, 0.12);
+
+    const worldSet = new Set(worldObjects);
+    const uiObjects = this.children.list.filter((obj) => !worldSet.has(obj));
+    cam.ignore(uiObjects);
+
+    this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
+    this.uiCamera.ignore(worldObjects);
+  }
+
+  /** Objeto de interface criado após o create() — só a câmera de UI o desenha. */
+  private claimUI(objs: Phaser.GameObjects.GameObject | Phaser.GameObjects.GameObject[]): void {
+    this.cameras.main.ignore(objs);
+  }
+
+  /** Objeto de mundo criado após o create() — a câmera de UI não o desenha. */
+  private claimWorld(objs: Phaser.GameObjects.GameObject | Phaser.GameObjects.GameObject[]): void {
+    this.uiCamera?.ignore(objs);
+  }
+
+  /** Escurecimento suave das bordas da tela — foco no centro. */
   private addVignette(): void {
+    const { width, height } = this.scale;
     const g = this.add.graphics().setDepth(13).setScrollFactor(0);
     const steps = 5;
     for (let i = 0; i < steps; i++) {
       const alpha = 0.1 - i * 0.018;
       const inset = i * 14;
       g.fillStyle(0x000008, alpha);
-      g.fillRect(0, inset, WORLD_WIDTH, 14);
-      g.fillRect(0, WORLD_HEIGHT - inset - 14, WORLD_WIDTH, 14);
-      g.fillRect(inset, 0, 14, WORLD_HEIGHT);
-      g.fillRect(WORLD_WIDTH - inset - 14, 0, 14, WORLD_HEIGHT);
+      g.fillRect(0, inset, width, 14);
+      g.fillRect(0, height - inset - 14, width, 14);
+      g.fillRect(inset, 0, 14, height);
+      g.fillRect(width - inset - 14, 0, 14, height);
     }
   }
 
@@ -106,7 +215,7 @@ export class ExplorationScene extends Phaser.Scene {
   private showDayBanner(): void {
     const story = STORY_DAYS[this.run.day - 1];
     const banner = this.add
-      .text(WORLD_WIDTH / 2, WORLD_HEIGHT * 0.32, story.title, {
+      .text(this.scale.width / 2, this.scale.height * 0.32, story.title, {
         fontFamily: FONT.family,
         fontSize: '30px',
         color: '#ddbbff',
@@ -121,6 +230,7 @@ export class ExplorationScene extends Phaser.Scene {
       .setAlpha(0)
       .setScale(0.8);
 
+    this.claimUI(banner);
     this.tweens.add({
       targets: banner,
       alpha: 1,
@@ -182,7 +292,7 @@ export class ExplorationScene extends Phaser.Scene {
   /** Banner discreto no topo — o mundo continua vivo sem travar o jogador. */
   private showEventToast(text: string): void {
     const toast = this.add
-      .text(WORLD_WIDTH / 2, 66, text, {
+      .text(this.scale.width / 2, 66, text, {
         fontFamily: FONT.family,
         fontSize: '12px',
         color: '#e8ddb8',
@@ -197,6 +307,7 @@ export class ExplorationScene extends Phaser.Scene {
       .setDepth(14)
       .setAlpha(0);
 
+    this.claimUI(toast);
     this.tweens.add({
       targets: toast,
       alpha: 0.96,
@@ -364,9 +475,80 @@ export class ExplorationScene extends Phaser.Scene {
     const cy = y + h / 2;
 
     switch (room.id) {
+      case 'foyer': {
+        // Entrada da mansão: porta dupla ao norte com estandartes
+        this.placeBase(cx - 9, y + 14, base(30, 6));
+        this.placeBase(cx + 9, y + 14, base(31, 6));
+        this.placeBase(cx - 40, y + 14, base(49, 1));
+        this.placeBase(cx + 40, y + 14, base(51, 1));
+        this.placeBase(x + 30, y + 16, base(29, 3)); // espelho oval
+        this.placeBase(x + w - 30, y + 14, base(26, 8)); // relógio
+        // Tapete de entrada (runner vertical) e candelabros de pé
+        for (let row = 0; row < 4; row++) {
+          this.placeIndoor(cx - 8, y + 46 + row * 16, indoor(23, row), -7);
+          this.placeIndoor(cx + 8, y + 46 + row * 16, indoor(24, row), -7);
+        }
+        this.placeIndoor(cx - 56, y + 60, indoor(17, 7));
+        this.placeIndoor(cx + 56, y + 60, indoor(17, 7));
+        this.placeIndoor(x + 22, y + h - 26, indoor(16, 0)); // plantas
+        this.placeIndoor(x + w - 22, y + h - 26, indoor(17, 0));
+        break;
+      }
+
+      case 'office': {
+        // Escritório: estantes, escrivaninha com vela e livro, quadro
+        for (const [col, sx] of [[44, 26], [46, 42], [45, 58]] as const) {
+          this.placeBase(x + sx, y + 18, base(col, 12));
+          this.placeBase(x + sx, y + 34, base(col, 13));
+        }
+        this.placeBase(x + w - 60, y + 12, base(45, 3)); // janela iluminada
+        this.placeIndoor(x + w - 28, y + 14, indoor(19, 12)); // quadro
+        this.placeIndoor(cx - 8, cy + 6, indoor(1, 0)); // escrivaninha
+        this.placeIndoor(cx + 8, cy + 6, indoor(2, 0));
+        this.placeIndoor(cx - 26, cy + 6, indoor(0, 2)); // cadeira
+        this.placeBase(cx - 8, cy + 4, base(50, 15), -5); // livro aberto
+        this.placeIndoor(cx + 8, cy + 2, indoor(16, 6), -5); // vela
+        this.placeBase(x + 24, y + h - 28, base(26, 0)); // barril de arquivo
+        this.placeIndoor(x + w - 22, y + h - 26, indoor(16, 0)); // planta
+        break;
+      }
+
+      case 'cellar': {
+        // Adega: barris, sacos e prateleira baixa à luz de vela
+        this.placeBase(x + 24, y + 20, base(26, 0));
+        this.placeBase(x + 44, y + 20, base(27, 0));
+        this.placeBase(x + 24, y + 40, base(26, 0));
+        this.placeBase(x + w - 28, y + 20, base(44, 13)); // prateleira
+        this.placeBase(x + w - 44, y + 20, base(45, 13));
+        this.placeBase(x + 30, y + h - 30, base(51, 15)); // sacos
+        this.placeBase(x + 48, y + h - 28, base(52, 15));
+        this.placeBase(x + w - 30, y + h - 32, base(26, 0)); // mais barris
+        this.placeBase(x + w - 48, y + h - 28, base(27, 0));
+        this.placeIndoor(cx, cy, indoor(16, 6), -5); // vela solitária
+        candleFlicker(this, cx, cy - 4);
+        break;
+      }
+
+      case 'greenhouse': {
+        // Estufa: canteiros em grade, plantas em vaso e cercas-vivas
+        for (let i = 0; i < 3; i++) {
+          this.placeBase(x + 50 + i * 60, y + 40, base(i % 3, 6));
+          this.placeBase(x + 50 + i * 60, y + 90, base((i + 1) % 3, 6));
+        }
+        this.placeBase(x + 24, y + 20, base(15, 9)); // árvores
+        this.placeBase(x + w - 26, y + 20, base(16, 9));
+        this.placeBase(x + 60, y + h - 18, base(19, 10)); // cercas-vivas
+        this.placeBase(x + 76, y + h - 18, base(20, 10));
+        this.placeBase(x + w - 60, y + h - 18, base(21, 10));
+        this.placeIndoor(x + 24, y + h - 30, indoor(16, 0)); // vasos
+        this.placeIndoor(x + w - 24, y + h - 30, indoor(17, 0));
+        this.placeIndoor(cx, y + h - 26, indoor(16, 0));
+        break;
+      }
+
       case 'library': {
         // Estantes cheias (2 tiles de altura) ao longo da parede superior
-        const shelfCols = [44, 45, 46, 47, 45, 46];
+        const shelfCols = [44, 45, 46, 47, 45, 46, 47, 44];
         shelfCols.forEach((col, i) => {
           this.placeBase(x + 26 + i * 16, y + 18, base(col, 12));
           this.placeBase(x + 26 + i * 16, y + 34, base(col, 13));
@@ -458,18 +640,18 @@ export class ExplorationScene extends Phaser.Scene {
       case 'corridor': {
         // Portas dos quartos intercaladas com quadros e tochas na parede superior
         for (let d = 0; d < 4; d++) {
-          this.placeBase(x + 30 + d * 52, y + 14, base(30, 6));
+          this.placeBase(x + 40 + d * 68, y + 14, base(30, 6));
         }
-        this.placeIndoor(x + 56, y + 12, indoor(19, 12), -7);
-        this.placeIndoor(x + 160, y + 12, indoor(21, 12), -7);
-        this.placeIndoor(x + 82, y + 12, indoor(20, 6), -7); // tochas
-        this.placeIndoor(x + 186, y + 12, indoor(21, 6), -7);
+        this.placeIndoor(x + 74, y + 12, indoor(19, 12), -7);
+        this.placeIndoor(x + 210, y + 12, indoor(21, 12), -7);
+        this.placeIndoor(x + 108, y + 12, indoor(20, 6), -7); // tochas
+        this.placeIndoor(x + 244, y + 12, indoor(21, 6), -7);
         // Camas dos hóspedes encostadas na parede de baixo
-        this.placeIndoor(x + 34, y + h - 22, indoor(12, 3));
-        this.placeIndoor(x + 86, y + h - 22, indoor(14, 3));
-        this.placeIndoor(x + 138, y + h - 22, indoor(13, 3));
-        this.placeIndoor(x + 190, y + h - 22, indoor(15, 3));
-        this.placeIndoor(x + w - 16, y + h - 26, indoor(16, 0)); // planta no fim
+        this.placeIndoor(x + 44, y + h - 22, indoor(12, 3));
+        this.placeIndoor(x + 112, y + h - 22, indoor(14, 3));
+        this.placeIndoor(x + 180, y + h - 22, indoor(13, 3));
+        this.placeIndoor(x + 248, y + h - 22, indoor(15, 3));
+        this.placeIndoor(x + w - 16, y + h - 60, indoor(16, 0)); // planta no fim
         break;
       }
 
@@ -534,7 +716,7 @@ export class ExplorationScene extends Phaser.Scene {
   // --- Spawns ---
 
   private spawnPlayer(): void {
-    this.player = new Player(this, 310, 260);
+    this.player = new Player(this, PLAYER_SPAWN.x, PLAYER_SPAWN.y);
     this.physics.add.collider(this.player.sprite, this.walls);
   }
 
@@ -646,17 +828,24 @@ export class ExplorationScene extends Phaser.Scene {
   // --- UI ---
 
   private setupUI(): void {
-    this.hud = new HUD(this, WORLD_WIDTH);
-    this.dialogueBox = new DialogueBox(this, WORLD_WIDTH, WORLD_HEIGHT);
-    this.journal = new Journal(this, WORLD_WIDTH, WORLD_HEIGHT, this.run);
-    this.interrogationPanel = new InterrogationPanel(this, WORLD_WIDTH, WORLD_HEIGHT, {
-      ask: (npc, questionId) => this.handleAsk(npc, questionId),
-      isAsked: (npcId, questionId) =>
-        (questionId === 'alliance' && this.run.allies.has(npcId)) ||
-        this.askedQuestions.has(this.questionKey(npcId, questionId)),
-      reading: (npcId) => this.describeReading(npcId),
-      onClose: () => this.checkCouncilUnlock(),
-    });
+    const { width, height } = this.scale;
+    this.hud = new HUD(this, width);
+    this.dialogueBox = new DialogueBox(this, width, height);
+    this.journal = new Journal(this, width, height, this.run, (objs) => this.claimUI(objs));
+    this.interrogationPanel = new InterrogationPanel(
+      this,
+      width,
+      height,
+      {
+        ask: (npc, questionId) => this.handleAsk(npc, questionId),
+        isAsked: (npcId, questionId) =>
+          (questionId === 'alliance' && this.run.allies.has(npcId)) ||
+          this.askedQuestions.has(this.questionKey(npcId, questionId)),
+        reading: (npcId) => this.describeReading(npcId),
+        onClose: () => this.checkCouncilUnlock(),
+      },
+      (objs) => this.claimUI(objs),
+    );
 
     this.hud.setDay(this.run.day);
     this.hud.setClueCount(this.run.clueSystem.getCollected().length);
@@ -683,6 +872,11 @@ export class ExplorationScene extends Phaser.Scene {
   // --- Loop ---
 
   update(_time: number, delta: number): void {
+    if (this.cutscene?.active) {
+      this.player.freeze();
+      return;
+    }
+
     if (this.inputCooldown > 0) {
       this.inputCooldown -= delta;
       return;
@@ -840,7 +1034,7 @@ export class ExplorationScene extends Phaser.Scene {
       glowRing.destroy();
     }
     if (withBurst) {
-      burst(this, marker.x, marker.y, SPECTACLE.burstCount, PALETTE.particle.cluePickup);
+      this.claimWorld(burst(this, marker.x, marker.y, SPECTACLE.burstCount, PALETTE.particle.cluePickup));
       this.cameras.main.shake(80, 0.005);
     }
     marker.destroy();
@@ -990,7 +1184,7 @@ export class ExplorationScene extends Phaser.Scene {
     if (this.councilButton) return;
 
     this.councilButton = this.add
-      .text(WORLD_WIDTH / 2, WORLD_HEIGHT - 14, '[ IR PARA O CONSELHO -> ]  (TAB)', {
+      .text(this.scale.width / 2, this.scale.height - 14, '[ IR PARA O CONSELHO -> ]  (TAB)', {
         fontFamily: FONT.family,
         fontSize: '14px',
         color: PALETTE.text.golden,
@@ -1005,6 +1199,7 @@ export class ExplorationScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
 
     this.councilButton.setResolution(FONT.resolution);
+    this.claimUI(this.councilButton);
     hoverBtn(this, this.councilButton, PALETTE.text.golden);
 
     const goToCouncil = () => {

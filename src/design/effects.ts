@@ -20,18 +20,21 @@ export function fadeOutTo(
   });
 }
 
+/** Retorna as partículas criadas — cenas com câmera dupla precisam registrá-las. */
 export function burst(
   scene: Phaser.Scene,
   x: number,
   y: number,
   count: number,
   color: number,
-): void {
+): Phaser.GameObjects.Arc[] {
+  const particles: Phaser.GameObjects.Arc[] = [];
   for (let i = 0; i < count; i++) {
     const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
     const speed = 50 + Math.random() * 70;
     const r = 2 + Math.random() * 2;
     const p = scene.add.circle(x, y, r, color, 1).setDepth(200);
+    particles.push(p);
     scene.tweens.add({
       targets: p,
       x: x + Math.cos(angle) * speed,
@@ -43,6 +46,7 @@ export function burst(
       onComplete: () => p.destroy(),
     });
   }
+  return particles;
 }
 
 function spawnOneDust(scene: Phaser.Scene, w: number, h: number): void {

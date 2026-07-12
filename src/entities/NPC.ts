@@ -19,6 +19,7 @@ export class NPC {
   readonly data: NPCData;
 
   private glow: Phaser.GameObjects.Arc;
+  private shadow: Phaser.GameObjects.Ellipse;
   private proximityRing: Phaser.GameObjects.Arc;
   private ringActive = false;
   private scene: Phaser.Scene;
@@ -50,6 +51,9 @@ export class NPC {
       ease: 'Sine.easeInOut',
       delay: Math.random() * 700,
     });
+
+    // Sombra no chão — mesma linguagem visual do jogador
+    this.shadow = scene.add.ellipse(x, y + 12, 20, 7, 0x000000, 0.3).setDepth(4);
 
     this.sprite = scene.add
       .sprite(x, y, `npc-${data.id}-0`)
@@ -155,6 +159,7 @@ export class NPC {
     this.baseX = this.sprite.x;
     this.baseY = this.sprite.y;
     this.glow.setPosition(this.sprite.x, this.sprite.y);
+    this.shadow.setPosition(this.sprite.x, this.sprite.y + 12);
     this.label.setPosition(this.sprite.x, this.sprite.y - SIZES.npc - 10);
     this.proximityRing.setPosition(this.sprite.x, this.sprite.y);
   }
@@ -207,6 +212,7 @@ export class NPC {
   setVisible(visible: boolean): void {
     this.sprite.setVisible(visible);
     this.glow.setVisible(visible);
+    this.shadow.setVisible(visible);
     this.label.setVisible(visible);
     this.proximityRing.setVisible(visible);
   }
@@ -222,6 +228,7 @@ export class NPC {
     this.scene.tweens.killTweensOf(this.label);
     this.sprite.destroy();
     this.glow.destroy();
+    this.shadow.destroy();
     this.label.destroy();
     this.proximityRing.destroy();
   }

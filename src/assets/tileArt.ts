@@ -35,11 +35,15 @@ export function preloadTileArt(scene: Phaser.Scene): void {
 
 /** Piso de cada cômodo (frames do sheet base). */
 export const ROOM_FLOOR_FRAMES: Record<string, number> = {
+  foyer: base(44, 26), // xadrez de mármore claro
   hall: base(25, 25), // tábuas de madeira
   library: base(25, 25),
+  office: base(25, 27), // tábuas claras
   kitchen: base(45, 26), // xadrez claro
+  cellar: base(45, 29), // tábuas escuras
   garden: base(21, 25), // grama
   corridor: base(25, 27), // tábuas claras
+  greenhouse: base(21, 25), // grama de estufa
   council: base(45, 29), // tábuas escuras avermelhadas
 };
 

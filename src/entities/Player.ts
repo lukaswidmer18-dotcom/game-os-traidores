@@ -8,6 +8,7 @@ export class Player {
   readonly sprite: Phaser.Physics.Arcade.Sprite;
   private glow: Phaser.GameObjects.Arc;
   private aura: Phaser.GameObjects.Arc;
+  private shadow: Phaser.GameObjects.Ellipse;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: {
     up: Phaser.Input.Keyboard.Key;
@@ -33,6 +34,9 @@ export class Player {
       repeat: -1,
       ease: 'Sine.easeInOut',
     });
+
+    // Sombra no chão — aterra o personagem no cenário
+    this.shadow = scene.add.ellipse(x, y + 12, 20, 7, 0x000000, 0.32).setDepth(4);
 
     // Main sprite — rectangle kept for physics consistency
     this.sprite = scene.physics.add
@@ -101,6 +105,7 @@ export class Player {
     // Keep visual effects centered on the sprite
     this.glow.setPosition(this.sprite.x, this.sprite.y);
     this.aura.setPosition(this.sprite.x, this.sprite.y);
+    this.shadow.setPosition(this.sprite.x, this.sprite.y + 12);
   }
 
   freeze(): void {

@@ -21,7 +21,9 @@ Sem variáveis de ambiente — o jogo roda 100% no navegador, sem backend.
 
 ## Como jogar
 
-- **Setas / WASD** — andar pela mansão (exploração top-down); os NPCs circulam pelos cômodos e param quando você se aproxima
+- **Setas / WASD** — andar pela mansão (exploração top-down com câmera que segue você em zoom 2x); os NPCs circulam pelos cômodos e param quando você se aproxima
+- A mansão tem **10 ambientes contíguos**: Foyer, Biblioteca, Escritório, Salão Principal, Corredor dos Quartos, Cozinha, Adega, Estufa, Mesa do Conselho e Jardim
+- **Cutscenes** abrem cada dia (panorâmica da mansão no dia 1; descoberta do corpo nos seguintes) — **ESPAÇO** pula
 - **E** perto de um NPC — abre o interrogatório; pergunte com clique ou teclas **1-5** (álibi, pressão, pedir um nome, confrontar com pista, **propor aliança**)
 - **E** perto de um marcador dourado — examina a pista
 - **J** — Livro do Investigador (Pistas / Pessoas / Diário) | **C** — abre direto nas Pistas | **ESC** — fecha painéis
@@ -54,7 +56,7 @@ src/
   scenes/    BootScene, ExplorationScene (andar/investigar), CouncilScene
              (votação), NightScene (eliminação noturna), GameOverScene
   systems/   RunState (estado da partida), TrustSystem, ClueSystem,
-             DialogueSystem, InterrogationSystem, VoteSystem
+             DialogueSystem, InterrogationSystem, VoteSystem, CutscenePlayer
   data/      NPCs, diálogos, pistas (gerador), acontecimentos, dias, mapa (world)
   assets/    arte do jogo: mapeamento dos tilesets Kenney (tileArt),
              composição de personagens (characterArt) e retratos (portraits)

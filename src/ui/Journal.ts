@@ -31,6 +31,8 @@ export class Journal {
     private readonly width: number,
     private readonly height: number,
     private readonly run: RunState,
+    /** Cena com câmera dupla registra os objetos recém-criados como UI. */
+    private readonly onBuilt?: (objs: Phaser.GameObjects.GameObject[]) => void,
   ) {}
 
   open(tab: JournalTab = 'clues'): void {
@@ -108,6 +110,9 @@ export class Journal {
     });
 
     this.container = this.scene.add.container(cx, cy, children).setDepth(25);
+    if (this.backdrop) {
+      this.onBuilt?.([this.backdrop, this.container]);
+    }
     this.bindHotkeys();
     this.renderTab();
   }

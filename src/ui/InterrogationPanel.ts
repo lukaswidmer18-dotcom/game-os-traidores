@@ -42,6 +42,8 @@ export class InterrogationPanel {
     private readonly width: number,
     private readonly height: number,
     private readonly callbacks: InterrogationCallbacks,
+    /** Cena com câmera dupla registra os objetos recém-criados como UI. */
+    private readonly onBuilt?: (objs: Phaser.GameObjects.GameObject[]) => void,
   ) {}
 
   open(npc: NPCData): void {
@@ -193,6 +195,9 @@ export class InterrogationPanel {
     });
 
     this.container = this.scene.add.container(cx, cy, children).setDepth(21);
+    if (this.backdrop) {
+      this.onBuilt?.([this.backdrop, this.container]);
+    }
     this.refreshButtons();
   }
 
